@@ -1,896 +1,611 @@
-const BASE_URL = "https://aniworld.to";
-const SEARCH_URL = BASE_URL + "/ajax/seriesSearch";
-
-async function soraFetch(url, options) {
-    options = options || {};
-    var headers = options.headers || {};
-
-    if (!headers["User-Agent"]) {
-        headers["User-Agent"] =
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
-            "AppleWebKit/537.36 (KHTML, like Gecko) " +
-            "Chrome/120.0.0.0 Safari/537.36";
-    }
-
-    if (!headers["Accept-Language"]) {
-        headers["Accept-Language"] = "de-DE,de;q=0.9,en;q=0.8";
-    }
-
-    try {
-        return await fetchv2(
-            url,
-            headers,
-            options.method || "GET",
-            options.body || null
-        );
-    } catch (e) {
-        try {
-            return await fetch(url, {
-                method: options.method || "GET",
-                headers: headers,
-                body: options.body || null
-            });
-        } catch (error) {
-            console.log("[AniWorld] Request failed:", url, error);
-            return null;
-        }
-    }
-}
-
-async function readText(response) {
-    if (!response) return "";
-    if (typeof response === "string") return response;
-
-    try {
-        if (typeof response.text === "function") {
-            return await response.text();
-        }
-    } catch (e) {
-        console.log("[AniWorld] response.text() failed:", e);
-    }
-
-    try {
-        return String(response);
-    } catch (e2) {
-        return "";
-    }
-}
-
-function absoluteUrl(url) {
-    if (!url) return "";
-
-    url = String(url).trim();
-
-    if (url.indexOf("https://") === 0 || url.indexOf("http://") === 0) {
-        return url;
-    }
-
-    if (url.indexOf("//") === 0) {
-        return "https:" + url;
-    }
-
-    if (url.charAt(0) === "/") {
-        return BASE_URL + url;
-    }
-
-    return BASE_URL + "/" + url;
-}
-
-function decodeHtml(text) {
-    if (!text) return "";
-
-    return String(text)
-        .replace(/&#x([0-9a-f]+);/gi, function (_, hex) {
-            return String.fromCharCode(parseInt(hex, 16));
-        })
-        .replace(/&#([0-9]+);/g, function (_, dec) {
-            return String.fromCharCode(parseInt(dec, 10));
-        })
-        .replace(/&quot;/gi, "\"")
-        .replace(/&#39;/gi, "'")
-        .replace(/&apos;/gi, "'")
-        .replace(/&amp;/gi, "&")
-        .replace(/&lt;/gi, "<")
-        .replace(/&gt;/gi, ">")
-        .replace(/&nbsp;/gi, " ");
-}
-
-function stripTags(text) {
-    if (!text) return "";
-    return String(text).replace(/<[^>]*>/g, " ");
-}
-
-function cleanText(text) {
-    return decodeHtml(stripTags(text || ""))
-        .replace(/\s+/g, " ")
-        .trim();
-}
-
-function uniqueStrings(values) {
-    var seen = {};
-    var result = [];
-
-    for (var i = 0; i < values.length; i++) {
-        var value = values[i];
-        if (!value || seen[value]) continue;
-        seen[value] = true;
-        result.push(value);
-    }
-
-    return result;
-}
-
-function getSeasonNumber(url) {
-    var match = String(url || "").match(/\/staffel-(\d+)/i);
-    return match ? parseInt(match[1], 10) : 0;
-}
-
-/* -------------------------------------------------------------------------- */
-/* SEARCH                                                                     */
-/* -------------------------------------------------------------------------- */
+///////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////       Main Functions          //////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////
 
 async function searchResults(keyword) {
-    try {
-        console.log("[AniWorld] Searching:", keyword);
+  try {
+    const encodedKeyword = encodeURIComponent(keyword);
+    const searchApiUrl = `https://aniworld.to/ajax/seriesSearch?keyword=${encodedKeyword}`;
+    const responseText = await fetch(searchApiUrl);
 
-        var response = await soraFetch(
-            SEARCH_URL + "?keyword=" + encodeURIComponent(keyword),
-            {
-                headers: {
-                    "Accept": "application/json",
-                    "Referer": BASE_URL + "/search",
-                    "Origin": BASE_URL
-                }
-            }
-        );
+    const data = await JSON.parse(responseText);
 
-        var text = await readText(response);
-        if (!text) return JSON.stringify([]);
+    const transformedResults = data.map((anime) => ({
+      title: anime.name,
+      image: `https://aniworld.to${anime.cover}`,
+      href: `https://aniworld.to/anime/stream/${anime.link}`,
+    }));
 
-        var data;
-        try {
-            data = JSON.parse(text);
-        } catch (jsonError) {
-            console.log("[AniWorld] Search JSON parse error:", jsonError);
-            return JSON.stringify([]);
-        }
-
-        if (!Array.isArray(data)) return JSON.stringify([]);
-
-        var results = [];
-
-        for (var i = 0; i < data.length; i++) {
-            var item = data[i] || {};
-            var title = cleanText(item.name || "");
-            var href = absoluteUrl(item.link || "");
-            var image = absoluteUrl(item.cover || "");
-
-            if (!title || !href) continue;
-
-            results.push({
-                title: title,
-                image: image,
-                href: href
-            });
-        }
-
-        console.log("[AniWorld] Results:", results.length);
-        return JSON.stringify(results);
-    } catch (error) {
-        console.log("[AniWorld] searchResults error:", error);
-        return JSON.stringify([]);
-    }
+    return JSON.stringify(transformedResults);
+  } catch (error) {
+    console.log("Fetch error:" + error);
+    return JSON.stringify([{ title: "Error", image: "", href: "" }]);
+  }
 }
-
-/* -------------------------------------------------------------------------- */
-/* DETAILS                                                                    */
-/* -------------------------------------------------------------------------- */
 
 async function extractDetails(url) {
-    try {
-        var response = await soraFetch(url, {
-            headers: {
-                "Accept": "text/html,application/xhtml+xml",
-                "Referer": BASE_URL + "/"
-            }
-        });
+  try {
+    const fetchUrl = `${url}`;
+    const text = await fetch(fetchUrl);
 
-        var html = await readText(response);
-        if (!html) {
-            return JSON.stringify([{
-                description: "",
-                aliases: "",
-                airdate: ""
-            }]);
-        }
+    const descriptionRegex =
+      /<p\s+class="seri_des"\s+itemprop="accessibilitySummary"\s+data-description-type="review"\s+data-full-description="([^"]*)".*?>(.*?)<\/p>/s;
+    const aliasesRegex = /<h1\b[^>]*\bdata-alternativetitles="([^"]+)"[^>]*>/i;
 
-        var description = extractDescription(html);
-        var aliases = extractAliases(html);
-        var airdate = extractAirdate(html);
-
-        return JSON.stringify([{
-            description: description,
-            aliases: aliases,
-            airdate: airdate
-        }]);
-    } catch (error) {
-        console.log("[AniWorld] extractDetails error:", error);
-        return JSON.stringify([{
-            description: "",
-            aliases: "",
-            airdate: ""
-        }]);
+    const aliasesMatch = aliasesRegex.exec(text);
+    let aliasesArray = [];
+    if (aliasesMatch) {
+      aliasesArray = aliasesMatch[1].split(",").map((a) => a.trim());
     }
+
+    const descriptionMatch = descriptionRegex.exec(text) || [];
+
+    const airdateMatch = "Unknown"; // TODO: Implement airdate extraction
+
+    const transformedResults = [
+      {
+        description: descriptionMatch[1] || "No description available",
+        aliases: aliasesArray[0] || "No aliases available",
+        airdate: airdateMatch,
+      },
+    ];
+
+    return JSON.stringify(transformedResults);
+  } catch (error) {
+    console.log("Details error:" + error);
+    return JSON.stringify([
+      {
+        description: "Error loading description",
+        aliases: "Duration: Unknown",
+        airdate: "Aired: Unknown",
+      },
+    ]);
+  }
 }
-
-function extractDescription(html) {
-    var match = html.match(
-        /class=["'][^"']*\bseri_des\b[^"']*["'][^>]*data-full-description=["']([^"']*)["']/i
-    );
-
-    if (!match) {
-        match = html.match(
-            /data-full-description=["']([^"']*)["'][^>]*class=["'][^"']*\bseri_des\b[^"']*["']/i
-        );
-    }
-
-    if (match && match[1]) {
-        return cleanText(match[1]);
-    }
-
-    var fallback = html.match(
-        /<p[^>]*class=["'][^"']*\bseri_des\b[^"']*["'][^>]*>([\s\S]*?)<\/p>/i
-    );
-
-    return fallback ? cleanText(fallback[1]) : "";
-}
-
-function extractAliases(html) {
-    var match = html.match(/data-alternativetitles=["']([^"']*)["']/i);
-    return match ? cleanText(match[1]) : "";
-}
-
-function extractAirdate(html) {
-    var start = "";
-    var end = "";
-
-    var startMatch = html.match(
-        /itemprop=["']startDate["'][\s\S]{0,300}?>(?:[\s\S]{0,100}?)?(\d{4})(?:<|[\s])/i
-    );
-
-    if (!startMatch) {
-        startMatch = html.match(
-            /itemprop=["']startDate["'][\s\S]{0,300}?\/animes\/jahr\/(\d{4})/i
-        );
-    }
-
-    var endMatch = html.match(
-        /itemprop=["']endDate["'][\s\S]{0,300}?>(?:[\s\S]{0,100}?)?(\d{4})(?:<|[\s])/i
-    );
-
-    if (!endMatch) {
-        endMatch = html.match(
-            /itemprop=["']endDate["'][\s\S]{0,300}?\/animes\/jahr\/(\d{4})/i
-        );
-    }
-
-    if (startMatch) start = startMatch[1];
-    if (endMatch) end = endMatch[1];
-
-    if (start && end && start !== end) return start + "-" + end;
-    return start || end || "";
-}
-
-/* -------------------------------------------------------------------------- */
-/* EPISODES                                                                   */
-/* -------------------------------------------------------------------------- */
 
 async function extractEpisodes(url) {
-    try {
-        var initialResponse = await soraFetch(url, {
-            headers: {
-                "Accept": "text/html,application/xhtml+xml",
-                "Referer": BASE_URL + "/"
-            }
-        });
+  try {
+    const baseUrl = "https://aniworld.to";
+    const fetchUrl = `${url}`;
+    const html = await fetch(fetchUrl);
 
-        var initialHtml = await readText(initialResponse);
-        if (!initialHtml) return JSON.stringify([]);
+    const finishedList = [];
+    const seasonLinks = getSeasonLinks(html);
 
-        var seasonUrls = [];
-
-        if (/\/staffel-\d+\/?$/i.test(url)) {
-            seasonUrls.push(url);
-        } else {
-            seasonUrls = discoverSeasonUrls(initialHtml);
-
-            if (seasonUrls.length === 0 &&
-                /itemtype=["']http:\/\/schema\.org\/Episode["']/i.test(initialHtml)) {
-                seasonUrls.push(url);
-            }
-        }
-
-        seasonUrls = uniqueStrings(seasonUrls);
-
-        seasonUrls.sort(function (a, b) {
-            return getSeasonNumber(a) - getSeasonNumber(b);
-        });
-
-        var finalEpisodes = [];
-        var numberOffset = 0;
-
-        for (var i = 0; i < seasonUrls.length; i++) {
-            var seasonUrl = seasonUrls[i];
-            var seasonHtml;
-
-            if (seasonUrl === url) {
-                seasonHtml = initialHtml;
-            } else {
-                var seasonResponse = await soraFetch(seasonUrl, {
-                    headers: {
-                        "Accept": "text/html,application/xhtml+xml",
-                        "Referer": url
-                    }
-                });
-
-                seasonHtml = await readText(seasonResponse);
-            }
-
-            if (!seasonHtml) continue;
-
-            var parsed = parseSeasonEpisodes(seasonHtml);
-
-            for (var j = 0; j < parsed.episodes.length; j++) {
-                var episode = parsed.episodes[j];
-
-                finalEpisodes.push({
-                    href: episode.href,
-                    number: numberOffset + episode.number
-                });
-            }
-
-            if (parsed.maxEpisodeNumber > 0) {
-                numberOffset += parsed.maxEpisodeNumber;
-            }
-        }
-
-        var deduped = [];
-        var seenHref = {};
-
-        for (var k = 0; k < finalEpisodes.length; k++) {
-            var ep = finalEpisodes[k];
-            if (!ep.href || seenHref[ep.href]) continue;
-            seenHref[ep.href] = true;
-            deduped.push(ep);
-        }
-
-        deduped.sort(function (a, b) {
-            return a.number - b.number;
-        });
-
-        console.log(
-            "[AniWorld] German-dub episodes:",
-            deduped.length,
-            "across",
-            seasonUrls.length,
-            "season(s)"
-        );
-
-        return JSON.stringify(deduped);
-    } catch (error) {
-        console.log("[AniWorld] extractEpisodes error:", error);
-        return JSON.stringify([]);
-    }
-}
-
-function discoverSeasonUrls(html) {
-    var urls = [];
-    var regex = /href=["']([^"']*\/staffel-(\d+)\/?[^"']*)["']/gi;
-    var match;
-
-    while ((match = regex.exec(html)) !== null) {
-        var href = match[1];
-
-        // Only keep actual season pages, not episode links.
-        href = href.replace(/\/episode-\d+.*$/i, "");
-        urls.push(absoluteUrl(href));
+    for (const seasonLink of seasonLinks) {
+      const seasonEpisodes = await fetchSeasonEpisodes(
+        `${baseUrl}${seasonLink}`
+      );
+      finishedList.push(...seasonEpisodes);
     }
 
-    return uniqueStrings(urls);
-}
-
-function parseSeasonEpisodes(html) {
-    var result = {
-        episodes: [],
-        maxEpisodeNumber: 0
-    };
-
-    // AniWorld normally uses schema.org Episode rows, but parsing every <tr>
-    // containing /episode-X makes the module more resilient to markup changes.
-    var rowRegex = /<tr\b[^>]*>[\s\S]*?<\/tr>/gi;
-    var rowMatch;
-    var seen = {};
-
-    while ((rowMatch = rowRegex.exec(html)) !== null) {
-        var row = rowMatch[0];
-
-        if (!/\/episode-\d+/i.test(row)) continue;
-
-        var number = extractEpisodeNumberFromRow(row);
-        if (!number) continue;
-
-        if (number > result.maxEpisodeNumber) {
-            result.maxEpisodeNumber = number;
-        }
-
-        if (!rowHasGermanDub(row)) continue;
-
-        var hrefMatch = row.match(
-            /href=["']([^"']*\/episode-\d+[^"']*)["']/i
-        );
-
-        if (!hrefMatch) continue;
-
-        var href = absoluteUrl(hrefMatch[1]);
-
-        if (seen[href]) continue;
-        seen[href] = true;
-
-        result.episodes.push({
-            href: href,
-            number: number
-        });
-    }
-
-    // Fallback for pages where the episode links are not wrapped in table rows.
-    if (result.episodes.length === 0) {
-        var linkRegex = /<a\b[^>]*href=["']([^"']*\/episode-(\d+)[^"']*)["'][^>]*>[\s\S]*?<\/a>/gi;
-        var linkMatch;
-
-        while ((linkMatch = linkRegex.exec(html)) !== null) {
-            var linkHref = absoluteUrl(linkMatch[1]);
-            var linkNumber = parseInt(linkMatch[2], 10);
-
-            if (!linkNumber || seen[linkHref]) continue;
-
-            // We cannot safely infer dub status from a bare link. Only accept
-            // it when a nearby chunk explicitly contains the German audio flag.
-            var start = Math.max(0, linkMatch.index - 800);
-            var end = Math.min(html.length, linkRegex.lastIndex + 1200);
-            var nearby = html.substring(start, end);
-
-            if (!rowHasGermanDub(nearby)) continue;
-
-            seen[linkHref] = true;
-
-            if (linkNumber > result.maxEpisodeNumber) {
-                result.maxEpisodeNumber = linkNumber;
-            }
-
-            result.episodes.push({
-                href: linkHref,
-                number: linkNumber
-            });
-        }
-    }
-
-    result.episodes.sort(function (a, b) {
-        return a.number - b.number;
+    // Replace the field "number" with the current index of each item, starting from 1
+    finishedList.forEach((item, index) => {
+      item.number = index + 1;
     });
 
-    return result;
+    return JSON.stringify(finishedList);
+  } catch (error) {
+    console.log("Fetch error:" + error);
+    return JSON.stringify([{ number: "0", href: "" }]);
+  }
 }
-
-function extractEpisodeNumberFromRow(row) {
-    var metaMatch = row.match(
-        /<meta\b[^>]*itemprop=["']episodeNumber["'][^>]*content=["'](\d+)["'][^>]*>/i
-    );
-
-    if (!metaMatch) {
-        metaMatch = row.match(
-            /<meta\b[^>]*content=["'](\d+)["'][^>]*itemprop=["']episodeNumber["'][^>]*>/i
-        );
-    }
-
-    if (metaMatch) {
-        return parseInt(metaMatch[1], 10);
-    }
-
-    var urlMatch = row.match(/\/episode-(\d+)/i);
-    return urlMatch ? parseInt(urlMatch[1], 10) : 0;
-}
-
-function rowHasGermanDub(row) {
-    // AniWorld uses /public/img/german.svg for German audio.
-    // Do NOT confuse it with japanese-german.svg, which represents German subtitles.
-    if (/src=["'][^"']*\/german\.svg(?:\?[^"']*)?["']/i.test(row)) {
-        return true;
-    }
-
-    if (/title=["'][^"']*(?:Deutsch\/German|Deutsche Sprache)[^"']*["']/i.test(row)) {
-        return true;
-    }
-
-    return false;
-}
-
-/* -------------------------------------------------------------------------- */
-/* STREAM                                                                     */
-/* -------------------------------------------------------------------------- */
 
 async function extractStreamUrl(url) {
-    try {
-        console.log("[AniWorld] Resolving episode:", url);
+  try {
+    const baseUrl = "https://aniworld.to";
+    const fetchUrl = `${url}`;
+    const text = await fetch(fetchUrl);
 
-        var episodePage = await fetchPageFollowingRedirects(url, {
-            headers: {
-                "Accept": "text/html,application/xhtml+xml",
-                "Referer": BASE_URL + "/"
-            }
-        }, 4);
+    const finishedList = [];
+    const languageList = getAvailableLanguages(text);
+    const videoLinks = getVideoLinks(text);
 
-        if (!episodePage || !episodePage.html) {
-            return emptyStreamResult();
-        }
-
-        var sources = [];
-
-        // 1. Direct media URL already present on the episode page.
-        appendMediaSources(
-            sources,
-            extractDirectPublicMediaUrls(episodePage.html, episodePage.finalUrl || url),
-            "AniWorld",
-            episodePage.finalUrl || url
-        );
-
-        // 2. AniWorld normally exposes provider links via /redirect/<id>.
-        // Follow only ordinary HTTP/meta/JS navigation redirects and inspect
-        // the resulting public HTML for directly visible HLS/MP4 URLs.
-        var redirects = extractAniWorldRedirects(episodePage.html);
-
-        console.log("[AniWorld] Provider redirects:", redirects.length);
-
-        for (var i = 0; i < redirects.length; i++) {
-            var provider = redirects[i];
-
-            try {
-                var providerPage = await fetchPageFollowingRedirects(
-                    provider.url,
-                    {
-                        headers: {
-                            "Accept": "text/html,application/xhtml+xml",
-                            "Referer": url
-                        }
-                    },
-                    5
-                );
-
-                if (!providerPage || !providerPage.html) continue;
-
-                var media = extractDirectPublicMediaUrls(
-                    providerPage.html,
-                    providerPage.finalUrl || provider.url
-                );
-
-                appendMediaSources(
-                    sources,
-                    media,
-                    provider.title || ("Hoster " + (i + 1)),
-                    providerPage.finalUrl || provider.url
-                );
-            } catch (providerError) {
-                console.log(
-                    "[AniWorld] Provider failed:",
-                    provider.title || provider.url,
-                    providerError
-                );
-            }
-        }
-
-        sources = dedupeSources(sources);
-
-        // Luna currently treats `streams` as [String] and structured objects
-        // under `sources`. Returning both also keeps older clients happier.
-        var streams = [];
-        for (var s = 0; s < sources.length; s++) {
-            streams.push(sources[s].streamUrl);
-        }
-
-        console.log("[AniWorld] Playable direct sources:", sources.length);
-
-        return JSON.stringify({
-            streams: streams,
-            subtitles: [],
-            sources: sources
+    for (const videoLink of videoLinks) {
+      const language = languageList.find(
+        (l) => l.langKey === videoLink.langKey
+      );
+      if (language) {
+        finishedList.push({
+          provider: videoLink.provider,
+          href: `${baseUrl}${videoLink.href}`,
+          language: language.title,
         });
-    } catch (error) {
-        console.log("[AniWorld] extractStreamUrl error:", error);
-        return emptyStreamResult();
+      }
+    }
+
+    // Select the hoster
+    const selectedHoster = selectHoster(finishedList);
+    const provider = selectedHoster.provider;
+    const providerLink = selectedHoster.href;
+    if (provider === "Error") {
+      console.log("No video found");
+      return JSON.stringify([{ provider: "Error", link: "" }]);
+    }
+    console.log("Selected provider: " + provider);
+    console.log("Selected link: " + providerLink);
+
+    const videoPage = await fetch(providerLink);
+    console.log("Video Page: " + videoPage.length);
+
+    const winLocRegex = /window\.location\.href\s*=\s*['"]([^'"]+)['"]/;
+    const winLocMatch = winLocRegex.exec(videoPage);
+    let winLocUrl = null;
+    if (!winLocMatch) {
+      winLocUrl = providerLink;
+    } else {
+      winLocUrl = winLocMatch[1];
+    }
+
+    const hlsSourceResponse = await fetch(winLocUrl);
+    const hlsSourcePage =
+      typeof hlsSourceResponse === "object"
+        ? await hlsSourceResponse.text()
+        : await hlsSourceResponse;
+    console.log("Provider: " + provider);
+    console.log("URL: " + winLocUrl);
+    console.log("HLS Source Page: " + hlsSourcePage.length);
+    
+    switch (provider) {
+      case "VOE":
+      try {
+        const voeJson = voeExtractor(hlsSourcePage);
+        return voeJson?.source || JSON.stringify([{ provider: "Error", link: "" }]);
+      } catch (error) {
+        console.log("VOE extractor error: " + error);
+        return JSON.stringify([{ provider: "Error", link: "" }]);
+      }
+
+      case "SpeedFiles":
+      try {
+        const speedfilesUrl = await speedfilesExtractor(hlsSourcePage);
+        return speedfilesUrl || JSON.stringify([{ provider: "Error", link: "" }]);
+      } catch (error) {
+        console.log("Speedfiles extractor error: " + error);
+        return JSON.stringify([{ provider: "Error", link: "" }]);
+      }
+
+      case "Vidmoly":
+      try {
+        const vidmolyUrl = vidmolyExtractor(hlsSourcePage);
+        return vidmolyUrl || JSON.stringify([{ provider: "Error", link: "" }]);
+      } catch (error) {
+        console.log("Vidmoly extractor error: " + error);
+        return JSON.stringify([{ provider: "Error", link: "" }]);
+      }
+
+      default:
+      console.log("Unsupported provider:", provider);
+      return JSON.stringify([{ provider: "Error", link: "" }]);
+    }
+    // END OF VOE EXTRACTOR
+
+    // Extract the sources variable and decode the hls value from base64
+    const sourcesRegex = /var\s+sources\s*=\s*({[^}]+})/;
+    const sourcesMatch = sourcesRegex.exec(hlsSourcePage);
+    let sourcesString = sourcesMatch
+      ? sourcesMatch[1].replace(/'/g, '"')
+      : null;
+
+    return sourcesString;
+  } catch (error) {
+    console.log("ExtractStreamUrl error:" + error);
+    return JSON.stringify([{ provider: "Error1", link: "" }]);
+  }
+}
+
+function selectHoster(finishedList) {
+  let firstVideo = null;
+  let provider = null;
+
+  // Define the preferred providers and languages
+  const providerList = ["Vidmoly", "SpeedFiles", "VOE"];
+  const languageList = ["Deutsch", "mit Untertitel Deutsch"];
+  
+
+  for (const providerName of providerList) {
+    for (const language of languageList) {
+      const video = finishedList.find(
+        (video) => video.provider === providerName && video.language === language
+      );
+      if (video) {
+        provider = providerName;
+        firstVideo = video;
+        break;
+      }
+    }
+    if (firstVideo) break;
+  }
+
+  // Default to the first video if no match is found
+  if (!firstVideo) {
+    firstVideo = finishedList[0];
+  }
+
+    if (firstVideo) {
+      return {
+        provider: provider,
+        href: firstVideo.href,
+      };
+    } else {
+      console.log("No video found");
+      return {
+        provider: "Error",
+        href: "https://error.org",
+      };
     }
 }
 
-function emptyStreamResult() {
-    return JSON.stringify({
-        streams: [],
-        subtitles: [],
-        sources: []
-    });
-}
+//Thanks to Ibro and Cufiy
+async function vidmolyExtractor(html) {
+  console.log("Vidmoly extractor");
+  console.log(html);
+    const regexSub = /<option value="([^"]+)"[^>]*>\s*SUB - Omega\s*<\/option>/;
+    const regexFallback = /<option value="([^"]+)"[^>]*>\s*Omega\s*<\/option>/;
+    const fallback = /<option value="([^"]+)"[^>]*>\s*SUB v2 - Omega\s*<\/option>/;
 
-function appendMediaSources(target, urls, providerName, referer) {
-    for (var i = 0; i < urls.length; i++) {
-        var mediaUrl = urls[i];
 
-        target.push({
-            title:
-                providerName +
-                (mediaUrl.toLowerCase().indexOf(".m3u8") !== -1
-                    ? " â¢ HLS â¢ German Dub"
-                    : " â¢ MP4 â¢ German Dub"),
-            streamUrl: mediaUrl,
-            headers: {
-                "Referer": referer || BASE_URL + "/",
-                "Origin": getOrigin(referer || BASE_URL)
-            }
-        });
-    }
-}
+    let match = html.match(regexSub) || html.match(regexFallback) || html.match(fallback);
+  if (match) {
+    console.log("Vidmoly extractor: Match found");
+    const decodedHtml = atob(match[1]); // Decode base64
+    const iframeMatch = decodedHtml.match(/<iframe\s+src="([^"]+)"/);
 
-function dedupeSources(sources) {
-    var result = [];
-    var seen = {};
-
-    for (var i = 0; i < sources.length; i++) {
-        var source = sources[i];
-        if (!source || !source.streamUrl || seen[source.streamUrl]) continue;
-
-        seen[source.streamUrl] = true;
-        result.push(source);
+    if (!iframeMatch) {
+        console.log("Vidmoly extractor: No iframe match found");
+        return null;
     }
 
-    return result;
+    const streamUrl = iframeMatch[1].startsWith("//") ? "https:" + iframeMatch[1] : iframeMatch[1];
+    console.log("Vidmoly extractor: Stream URL: " + streamUrl);
+
+    const responseTwo = await fetchv2(streamUrl);
+    const htmlTwo = await responseTwo.text();
+
+    const m3u8Match = htmlTwo.match(/sources:\s*\[\{file:"([^"]+\.m3u8)"/);
+    console.log(m3u8Match ? m3u8Match[1] : null);
+    return m3u8Match ? m3u8Match[1] : null;
+  } else {
+    console.log("Vidmoly extractor: No match found, using fallback");
+  //  regex the sources: [{file:"this_is_the_link"}]
+    const sourcesRegex = /sources:\s*\[\{file:"(https?:\/\/[^"]+)"\}/;
+    const sourcesMatch = html.match(sourcesRegex);
+    let sourcesString = sourcesMatch
+      ? sourcesMatch[1].replace(/'/g, '"')
+      : null;
+
+    return sourcesString;
+  }
+}
+    
+
+// Thanks to Cufiy
+function speedfilesExtractor(sourcePageHtml) {
+  // get var _0x5opu234 = "THIS_IS_AN_ENCODED_STRING"
+  const REGEX = /var\s+_0x5opu234\s*=\s*"([^"]+)"/;
+  const match = sourcePageHtml.match(REGEX);
+  if (match == null || match[1] == null) {
+    console.log("Could not extract from Speedfiles source");
+    return null;
+  }
+
+  const encodedString = match[1];
+  console.log("Encoded String:" + encodedString);
+
+  // Step 1: Base64 decode the initial string
+  let step1 = atob(encodedString);
+  console.log("Step 1:" + step1);
+
+  // Step 2: Swap character cases and reverse
+  let step2 = step1
+    .split("")
+    .map((c) =>
+      /[a-zA-Z]/.test(c)
+        ? c === c.toLowerCase()
+          ? c.toUpperCase()
+          : c.toLowerCase()
+        : c
+    )
+    .join("");
+  console.log("Step 2:" + step2);
+  let step3 = step2.split("").reverse().join("");
+  console.log("Step 3:" + step3);
+
+  // Step 3: Base64 decode again and reverse
+  let step4 = atob(step3);
+  console.log("Step 4:" + step4);
+  let step5 = step4.split("").reverse().join("");
+  console.log("Step 5:" + step5);
+
+  // Step 4: Hex decode pairs
+  let step6 = "";
+  for (let i = 0; i < step5.length; i += 2) {
+    step6 += String.fromCharCode(parseInt(step5.substr(i, 2), 16));
+  }
+  console.log("Step 6:" + step6);
+
+  // Step 5: Subtract 3 from character codes
+  let step7 = step6
+    .split("")
+    .map((c) => String.fromCharCode(c.charCodeAt(0) - 3))
+    .join("");
+  console.log("Step 7:" + step7);
+
+  // Step 6: Final case swap, reverse, and Base64 decode
+  let step8 = step7
+    .split("")
+    .map((c) =>
+      /[a-zA-Z]/.test(c)
+        ? c === c.toLowerCase()
+          ? c.toUpperCase()
+          : c.toLowerCase()
+        : c
+    )
+    .join("");
+  console.log("Step 8:" + step8);
+  let step9 = step8.split("").reverse().join("");
+  console.log("Step 9:" + step9);
+
+  // return atob(step9);
+  let decodedUrl = atob(step9);
+  console.log("Decoded URL:" + decodedUrl);
+  return decodedUrl;
 }
 
-function extractAniWorldRedirects(html) {
-    var result = [];
-    var seen = {};
-    var regex = /href=["']([^"']*\/redirect\/[^"']+)["']/gi;
-    var match;
+// Thanks to https://github.com/ShadeOfChaos
 
-    while ((match = regex.exec(html)) !== null) {
-        var raw = match[1];
-        var url = resolveAgainst(raw, BASE_URL);
+/**
+ * Extracts a JSON object from the given source page by finding the
+ * encoded string marked with the regex /MKGMa="([\s\S]+?)"/ and
+ * decoding it using the voeDecoder function.
+ * @param {string} sourcePageHtml - The source page to be parsed.
+ * @returns {object|null} The extracted JSON object if successful,
+ *   otherwise null.
+ */
+function voeExtractor(sourcePageHtml) {
+  const REGEX = /MKGMa="([\s\S]+?)"/;
 
-        if (!url || seen[url]) continue;
-        seen[url] = true;
+  const match = sourcePageHtml.match(REGEX);
+  if (match == null || match[1] == null) {
+    console.log("Could not extract from Voe source");
+    return null;
+  }
 
-        // Inspect a small nearby HTML chunk for provider labels such as
-        // title="VOE", class="icon VOE", etc.
-        var start = Math.max(0, match.index - 500);
-        var end = Math.min(html.length, regex.lastIndex + 500);
-        var nearby = html.substring(start, end);
+  const encodedString = match[1];
+  const decodedJson = voeDecoder(encodedString);
 
-        var title = "";
+  return decodedJson;
+}
 
-        var titleMatch = nearby.match(
-            /(?:title|data-provider|data-hoster)=["']([^"']{2,40})["']/i
-        );
+/**
+ * Decodes the given MKGMa string, which is a custom encoded string used
+ * by VOE. This function applies the following steps to the input string to
+ * decode it:
+ * 1. Apply ROT13 to each alphabetical character in the string.
+ * 2. Remove all underscores from the string.
+ * 3. Decode the string using the Base64 algorithm.
+ * 4. Apply a character shift of 0x3 to each character in the decoded string.
+ * 5. Reverse the order of the characters in the shifted string.
+ * 6. Decode the reversed string using the Base64 algorithm again.
+ * 7. Parse the decoded string as JSON.
+ * @param {string} MKGMa_String - The input string to be decoded.
+ * @returns {object} The decoded JSON object.
+ */
+function voeDecoder(MKGMa_String) {
+  let ROT13String = ROT13(MKGMa_String);
+  let sanitizedString = voeSanitizer(ROT13String);
+  let UnderscoreRemoved = sanitizedString.split("_").join("");
+  let base64DecodedString = atob(UnderscoreRemoved);
+  let charShiftedString = shiftCharacter(base64DecodedString, 0x3);
+  let reversedString = charShiftedString.split("").reverse().join("");
+  let base64DecodedStringAgain = atob(reversedString);
+  let decodedJson;
+  try {
+    decodedJson = JSON.parse(base64DecodedStringAgain);
+  } catch (error) {
+    console.log("JSON parse error:", error);
+    decodedJson = {};
+  }
+  return decodedJson;
+}
 
-        if (titleMatch) {
-            title = cleanText(titleMatch[1]);
-        }
+/**
+ * Encodes a given string using the ROT13 cipher, which shifts each letter
+ * 13 places forward in the alphabet. Only alphabetical characters are
+ * transformed; other characters remain unchanged.
+ *
+ * @param {string} string - The input string to be encoded.
+ * @returns {string} The encoded string with ROT13 applied.
+ */
+function ROT13(string) {
+  let ROT13String = "";
 
-        if (!title) {
-            var iconMatch = nearby.match(
-                /class=["'][^"']*\b(?:VOE|Vidmoly|Filemoon|Doodstream|Dood|Streamtape)\b[^"']*["']/i
-            );
+  for (let i = 0; i < string.length; i++) {
+    let currentCharCode = string.charCodeAt(i);
 
-            if (iconMatch) {
-                var nameMatch = iconMatch[0].match(
-                    /\b(VOE|Vidmoly|Filemoon|Doodstream|Dood|Streamtape)\b/i
-                );
-                if (nameMatch) title = nameMatch[1];
-            }
-        }
-
-        result.push({
-            url: url,
-            title: title || "AniWorld Hoster"
-        });
+    // Check for uppercase
+    if (currentCharCode >= 65 && currentCharCode <= 90) {
+      currentCharCode = ((currentCharCode - 65 + 13) % 26) + 65;
+      // Check for lowercase
+    } else if (currentCharCode >= 97 && currentCharCode <= 122) {
+      currentCharCode = ((currentCharCode - 97 + 13) % 26) + 97;
     }
 
-    return result;
+    ROT13String += String.fromCharCode(currentCharCode);
+  }
+
+  return ROT13String;
 }
 
-async function fetchPageFollowingRedirects(url, options, maxHops) {
-    var currentUrl = url;
-    var hops = typeof maxHops === "number" ? maxHops : 4;
-    var lastHtml = "";
+/**
+ * Sanitizes a given string by replacing all occurrences of certain "trash" strings
+ * with an underscore. The trash strings are '@$', '^^', '~@', '%?', '*~', '!!', '#&'.
+ * This is used to decode VOE encoded strings.
+ * @param {string} string The string to be sanitized.
+ * @returns {string} The sanitized string.
+ */
+function voeSanitizer(string) {
+  let sanitizationArray = ["@$", "^^", "~@", "%?", "*~", "!!", "#&"];
+  let tempString = string;
 
-    for (var i = 0; i <= hops; i++) {
-        var response = await soraFetch(currentUrl, options || {});
-        if (!response) {
-            return {
-                html: lastHtml,
-                finalUrl: currentUrl
-            };
-        }
-
-        var location = getHeaderValue(response.headers, "location");
-
-        if (location) {
-            currentUrl = resolveAgainst(location, currentUrl);
-            continue;
-        }
-
-        var html = await readText(response);
-        lastHtml = html;
-
-        var responseUrl = "";
-        try {
-            if (response.url && typeof response.url === "string") {
-                responseUrl = response.url;
-            }
-        } catch (e) {}
-
-        if (responseUrl) {
-            currentUrl = responseUrl;
-        }
-
-        // Follow simple, unobfuscated navigation redirects only.
-        var pageRedirect = extractSimplePageRedirect(html);
-        if (pageRedirect) {
-            var nextUrl = resolveAgainst(pageRedirect, currentUrl);
-
-            if (nextUrl && nextUrl !== currentUrl) {
-                currentUrl = nextUrl;
-                continue;
-            }
-        }
-
-        return {
-            html: html,
-            finalUrl: currentUrl
-        };
-    }
-
-    return {
-        html: lastHtml,
-        finalUrl: currentUrl
-    };
-}
-
-function getHeaderValue(headers, name) {
-    if (!headers) return "";
-
-    var wanted = String(name || "").toLowerCase();
-
-    try {
-        if (typeof headers.get === "function") {
-            return headers.get(name) || headers.get(wanted) || "";
-        }
-    } catch (e) {}
-
-    for (var key in headers) {
-        if (
-            Object.prototype.hasOwnProperty.call(headers, key) &&
-            String(key).toLowerCase() === wanted
-        ) {
-            return String(headers[key] || "");
-        }
-    }
-
-    return "";
-}
-
-function extractSimplePageRedirect(html) {
-    if (!html) return "";
-
-    // Meta refresh.
-    var meta = html.match(
-        /<meta\b[^>]*http-equiv=["']?refresh["']?[^>]*content=["'][^"']*url\s*=\s*([^"'>\s]+)[^"']*["'][^>]*>/i
+  for (let i = 0; i < sanitizationArray.length; i++) {
+    let currentTrash = sanitizationArray[i];
+    let sanitizedString = new RegExp(
+      currentTrash.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+      "g"
     );
-    if (meta && meta[1]) return decodeHtml(meta[1]);
 
-    // Straightforward window/location assignment. Intentionally does not
-    // evaluate packed/obfuscated JavaScript.
-    var js = html.match(
-        /(?:window\.)?location(?:\.href)?\s*=\s*["']([^"']+)["']/i
+    tempString = tempString.replace(sanitizedString, "_");
+  }
+
+  return tempString;
+}
+
+/**
+ * Shifts the characters in a string by a given number of places.
+ * @param {string} string - The string to shift.
+ * @param {number} shiftNum - The number of places to shift the string.
+ * @returns {string} The shifted string.
+ */
+function shiftCharacter(string, shiftNum) {
+  let tempArray = [];
+
+  for (let i = 0; i < string.length; i++) {
+    tempArray.push(String.fromCharCode(string.charCodeAt(i) - shiftNum));
+  }
+
+  return tempArray.join("");
+}
+
+////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////       Helper Functions       ////////////////////////////
+////////////////////////////      for ExtractEpisodes     ////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////
+
+// Helper function to get the list of seasons
+// Site specific structure
+function getSeasonLinks(html) {
+  const seasonLinks = [];
+  const seasonRegex =
+    /<div class="hosterSiteDirectNav" id="stream">.*?<ul>(.*?)<\/ul>/s;
+  const seasonMatch = seasonRegex.exec(html);
+  if (seasonMatch) {
+    const seasonList = seasonMatch[1];
+    const seasonLinkRegex = /<a[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/g;
+    let seasonLinkMatch;
+    const filmeLinks = [];
+    while ((seasonLinkMatch = seasonLinkRegex.exec(seasonList)) !== null) {
+      const [_, seasonLink] = seasonLinkMatch;
+      if (seasonLink.endsWith("/filme")) {
+        filmeLinks.push(seasonLink);
+      } else {
+        seasonLinks.push(seasonLink);
+      }
+    }
+    seasonLinks.push(...filmeLinks);
+  }
+  return seasonLinks;
+}
+
+// Helper function to fetch episodes for a season
+// Site specific structure
+async function fetchSeasonEpisodes(url) {
+  try {
+    const baseUrl = "https://aniworld.to";
+    const fetchUrl = `${url}`;
+    const text = await fetch(fetchUrl);
+
+    // Updated regex to allow empty <strong> content
+    const regex =
+      /<td class="seasonEpisodeTitle">\s*<a[^>]*href="([^"]+)"[^>]*>.*?<strong>([^<]*)<\/strong>.*?<span>([^<]+)<\/span>.*?<\/a>/g;
+
+    const matches = [];
+    let match;
+    let holderNumber = 0;
+
+    while ((match = regex.exec(text)) !== null) {
+      const [_, link] = match;
+      matches.push({ number: holderNumber, href: `${baseUrl}${link}` });
+    }
+
+    return matches;
+  } catch (error) {
+    console.log("FetchSeasonEpisodes helper function error:" + error);
+    return [{ number: "0", href: "https://error.org" }];
+  }
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////       Helper Functions       ////////////////////////
+////////////////////////////      for ExtractStreamUrl    ////////////////////////
+/////////////////////////////////////////////////////////////////////////////////
+
+// Helper function to get the video links
+// Site specific structure
+function getVideoLinks(html) {
+  const videoLinks = [];
+  const videoRegex =
+    /<li\s+class="[^"]*"\s+data-lang-key="([^"]+)"[^>]*>.*?<a[^>]*href="([^"]+)"[^>]*>.*?<h4>([^<]+)<\/h4>.*?<\/a>.*?<\/li>/gs;
+  let match;
+
+  while ((match = videoRegex.exec(html)) !== null) {
+    const [_, langKey, href, provider] = match;
+    videoLinks.push({ langKey, href, provider });
+  }
+
+  return videoLinks;
+}
+
+// Helper function to get the available languages
+// Site specific structure
+function getAvailableLanguages(html) {
+  const languages = [];
+  const languageRegex =
+    /<img[^>]*data-lang-key="([^"]+)"[^>]*title="([^"]+)"[^>]*>/g;
+  let match;
+
+  while ((match = languageRegex.exec(html)) !== null) {
+    const [_, langKey, title] = match;
+    languages.push({ langKey, title });
+  }
+
+  return languages;
+}
+
+// Helper function to fetch the base64 encoded string
+function base64Decode(str) {
+  const chars =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
+  let output = "";
+
+  str = String(str).replace(/=+$/, "");
+
+  if (str.length % 4 === 1) {
+    throw new Error(
+      "'atob' failed: The string to be decoded is not correctly encoded."
     );
-    if (js && js[1]) return decodeHtml(js[1]);
+  }
 
-    var replace = html.match(
-        /location\.replace\(\s*["']([^"']+)["']\s*\)/i
-    );
-    if (replace && replace[1]) return decodeHtml(replace[1]);
+  for (
+    let bc = 0, bs, buffer, idx = 0;
+    (buffer = str.charAt(idx++));
+    ~buffer && ((bs = bc % 4 ? bs * 64 + buffer : buffer), bc++ % 4)
+      ? (output += String.fromCharCode(255 & (bs >> ((-2 * bc) & 6))))
+      : 0
+  ) {
+    buffer = chars.indexOf(buffer);
+  }
 
-    return "";
+  return output;
 }
 
-function extractDirectPublicMediaUrls(html, baseUrl) {
-    if (!html) return [];
+// Debugging function to send logs
+// async function sendLog(message) {
+//     // send http://192.168.2.130/sora-module/log.php?action=add&message=message
+//     console.log(message);
 
-    var normalized = String(html)
-        .replace(/\\\//g, "/")
-        .replace(/\\u0026/gi, "&")
-        .replace(/\\u003d/gi, "=")
-        .replace(/&amp;/gi, "&");
-
-    var candidates = [];
-    var match;
-
-    // Absolute media URLs.
-    var absoluteRegex =
-        /https?:\/\/[^"'\\\s<>]+?\.(?:m3u8|mp4)(?:\?[^"'\\\s<>]*)?/gi;
-
-    while ((match = absoluteRegex.exec(normalized)) !== null) {
-        candidates.push(match[0]);
-    }
-
-    // Root-relative / path-relative media URLs.
-    var quotedMediaRegex =
-        /["']([^"']+?\.(?:m3u8|mp4)(?:\?[^"']*)?)["']/gi;
-
-    while ((match = quotedMediaRegex.exec(normalized)) !== null) {
-        var candidate = match[1];
-
-        if (/^https?:\/\//i.test(candidate)) {
-            candidates.push(candidate);
-        } else {
-            candidates.push(resolveAgainst(candidate, baseUrl || BASE_URL));
-        }
-    }
-
-    candidates = uniqueStrings(candidates);
-
-    var valid = [];
-
-    for (var i = 0; i < candidates.length; i++) {
-        if (validateStreamUrl(candidates[i])) {
-            valid.push(candidates[i]);
-        }
-    }
-
-    return valid;
-}
-
-function validateStreamUrl(url) {
-    if (!url) return false;
-
-    return /^https?:\/\//i.test(url) &&
-        /\.(?:m3u8|mp4)(?:\?|$)/i.test(url);
-}
-
-function getOrigin(url) {
-    var match = String(url || "").match(/^(https?:\/\/[^\/]+)/i);
-    return match ? match[1] : BASE_URL;
-}
-
-function resolveAgainst(value, base) {
-    if (!value) return "";
-
-    value = decodeHtml(String(value).trim());
-    base = String(base || BASE_URL);
-
-    if (/^https?:\/\//i.test(value)) return value;
-
-    if (value.indexOf("//") === 0) {
-        var scheme = /^http:\/\//i.test(base) ? "http:" : "https:";
-        return scheme + value;
-    }
-
-    var origin = getOrigin(base);
-
-    if (value.charAt(0) === "/") {
-        return origin + value;
-    }
-
-    var cleanBase = base.split("#")[0].split("?")[0];
-    var slash = cleanBase.lastIndexOf("/");
-    var directory =
-        slash > cleanBase.indexOf("://") + 2
-            ? cleanBase.substring(0, slash + 1)
-            : cleanBase + "/";
-
-    return directory + value;
-}
+//     await fetch('http://192.168.2.130/sora-module/log.php?action=add&message=' + encodeURIComponent(message))
+//     .catch(error => {
+//         console.error('Error sending log:', error);
+//     });
+// }
