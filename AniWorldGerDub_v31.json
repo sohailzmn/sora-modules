@@ -1,5 +1,5 @@
 {
-  "sourceName": "AniWorld (GER DUB) v3.3.0",
+  "sourceName": "AniWorld (GER DUB) v3.3.1",
   "iconUrl": "https://git.luna-app.eu/Cufiy/sora-modules/raw/branch/main/modules/aniworld/aniworld.png",
   "iconURL": "https://git.luna-app.eu/Cufiy/sora-modules/raw/branch/main/modules/aniworld/aniworld.png",
   "author": {
@@ -7,7 +7,7 @@
     "icon": "https://git.luna-app.eu/Cufiy/sora-modules/raw/branch/main/modules/aniworld/aniworld.png",
     "iconURL": "https://git.luna-app.eu/Cufiy/sora-modules/raw/branch/main/modules/aniworld/aniworld.png"
   },
-  "version": "3.3.0",
+  "version": "3.3.1",
   "language": "German (DUB)",
   "baseUrl": "https://aniworld.to",
   "streamType": "HLS",
