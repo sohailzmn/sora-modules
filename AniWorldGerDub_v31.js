@@ -405,13 +405,16 @@ function parseSeasonEpisodes(html) {
         maxEpisodeNumber: 0
     };
 
-    var rowRegex =
-        /<tr\b[^>]*itemtype=["']http:\/\/schema\.org\/Episode["'][^>]*>[\s\S]*?<\/tr>/gi;
-
+    // AniWorld normally uses schema.org Episode rows, but parsing every <tr>
+    // containing /episode-X makes the module more resilient to markup changes.
+    var rowRegex = /<tr\b[^>]*>[\s\S]*?<\/tr>/gi;
     var rowMatch;
+    var seen = {};
 
     while ((rowMatch = rowRegex.exec(html)) !== null) {
         var row = rowMatch[0];
+
+        if (!/\/episode-\d+/i.test(row)) continue;
 
         var number = extractEpisodeNumberFromRow(row);
         if (!number) continue;
@@ -428,11 +431,52 @@ function parseSeasonEpisodes(html) {
 
         if (!hrefMatch) continue;
 
+        var href = absoluteUrl(hrefMatch[1]);
+
+        if (seen[href]) continue;
+        seen[href] = true;
+
         result.episodes.push({
-            href: absoluteUrl(hrefMatch[1]),
+            href: href,
             number: number
         });
     }
+
+    // Fallback for pages where the episode links are not wrapped in table rows.
+    if (result.episodes.length === 0) {
+        var linkRegex = /<a\b[^>]*href=["']([^"']*\/episode-(\d+)[^"']*)["'][^>]*>[\s\S]*?<\/a>/gi;
+        var linkMatch;
+
+        while ((linkMatch = linkRegex.exec(html)) !== null) {
+            var linkHref = absoluteUrl(linkMatch[1]);
+            var linkNumber = parseInt(linkMatch[2], 10);
+
+            if (!linkNumber || seen[linkHref]) continue;
+
+            // We cannot safely infer dub status from a bare link. Only accept
+            // it when a nearby chunk explicitly contains the German audio flag.
+            var start = Math.max(0, linkMatch.index - 800);
+            var end = Math.min(html.length, linkRegex.lastIndex + 1200);
+            var nearby = html.substring(start, end);
+
+            if (!rowHasGermanDub(nearby)) continue;
+
+            seen[linkHref] = true;
+
+            if (linkNumber > result.maxEpisodeNumber) {
+                result.maxEpisodeNumber = linkNumber;
+            }
+
+            result.episodes.push({
+                href: linkHref,
+                number: linkNumber
+            });
+        }
+    }
+
+    result.episodes.sort(function (a, b) {
+        return a.number - b.number;
+    });
 
     return result;
 }
@@ -476,71 +520,325 @@ function rowHasGermanDub(row) {
 
 async function extractStreamUrl(url) {
     try {
-        var response = await soraFetch(url, {
+        console.log("[AniWorld] Resolving episode:", url);
+
+        var episodePage = await fetchPageFollowingRedirects(url, {
             headers: {
                 "Accept": "text/html,application/xhtml+xml",
                 "Referer": BASE_URL + "/"
             }
-        });
+        }, 4);
 
-        var html = await readText(response);
-        if (!html) {
-            return JSON.stringify({ streams: [] });
+        if (!episodePage || !episodePage.html) {
+            return emptyStreamResult();
         }
 
-        var candidates = extractDirectPublicMediaUrls(html);
+        var sources = [];
+
+        // 1. Direct media URL already present on the episode page.
+        appendMediaSources(
+            sources,
+            extractDirectPublicMediaUrls(episodePage.html, episodePage.finalUrl || url),
+            "AniWorld",
+            episodePage.finalUrl || url
+        );
+
+        // 2. AniWorld normally exposes provider links via /redirect/<id>.
+        // Follow only ordinary HTTP/meta/JS navigation redirects and inspect
+        // the resulting public HTML for directly visible HLS/MP4 URLs.
+        var redirects = extractAniWorldRedirects(episodePage.html);
+
+        console.log("[AniWorld] Provider redirects:", redirects.length);
+
+        for (var i = 0; i < redirects.length; i++) {
+            var provider = redirects[i];
+
+            try {
+                var providerPage = await fetchPageFollowingRedirects(
+                    provider.url,
+                    {
+                        headers: {
+                            "Accept": "text/html,application/xhtml+xml",
+                            "Referer": url
+                        }
+                    },
+                    5
+                );
+
+                if (!providerPage || !providerPage.html) continue;
+
+                var media = extractDirectPublicMediaUrls(
+                    providerPage.html,
+                    providerPage.finalUrl || provider.url
+                );
+
+                appendMediaSources(
+                    sources,
+                    media,
+                    provider.title || ("Hoster " + (i + 1)),
+                    providerPage.finalUrl || provider.url
+                );
+            } catch (providerError) {
+                console.log(
+                    "[AniWorld] Provider failed:",
+                    provider.title || provider.url,
+                    providerError
+                );
+            }
+        }
+
+        sources = dedupeSources(sources);
+
+        // Luna currently treats `streams` as [String] and structured objects
+        // under `sources`. Returning both also keeps older clients happier.
         var streams = [];
-
-        for (var i = 0; i < candidates.length; i++) {
-            var streamUrl = candidates[i];
-
-            streams.push({
-                title: streamUrl.indexOf(".m3u8") !== -1
-                    ? "HLS • German Dub"
-                    : "MP4 • German Dub",
-                streamUrl: streamUrl,
-                headers: {
-                    "Referer": url,
-                    "Origin": BASE_URL
-                }
-            });
+        for (var s = 0; s < sources.length; s++) {
+            streams.push(sources[s].streamUrl);
         }
 
-        console.log("[AniWorld] Direct media streams:", streams.length);
+        console.log("[AniWorld] Playable direct sources:", sources.length);
 
         return JSON.stringify({
-            streams: streams
+            streams: streams,
+            subtitles: [],
+            sources: sources
         });
     } catch (error) {
         console.log("[AniWorld] extractStreamUrl error:", error);
-        return JSON.stringify({ streams: [] });
+        return emptyStreamResult();
     }
 }
 
-function extractDirectPublicMediaUrls(html) {
+function emptyStreamResult() {
+    return JSON.stringify({
+        streams: [],
+        subtitles: [],
+        sources: []
+    });
+}
+
+function appendMediaSources(target, urls, providerName, referer) {
+    for (var i = 0; i < urls.length; i++) {
+        var mediaUrl = urls[i];
+
+        target.push({
+            title:
+                providerName +
+                (mediaUrl.toLowerCase().indexOf(".m3u8") !== -1
+                    ? " â¢ HLS â¢ German Dub"
+                    : " â¢ MP4 â¢ German Dub"),
+            streamUrl: mediaUrl,
+            headers: {
+                "Referer": referer || BASE_URL + "/",
+                "Origin": getOrigin(referer || BASE_URL)
+            }
+        });
+    }
+}
+
+function dedupeSources(sources) {
+    var result = [];
+    var seen = {};
+
+    for (var i = 0; i < sources.length; i++) {
+        var source = sources[i];
+        if (!source || !source.streamUrl || seen[source.streamUrl]) continue;
+
+        seen[source.streamUrl] = true;
+        result.push(source);
+    }
+
+    return result;
+}
+
+function extractAniWorldRedirects(html) {
+    var result = [];
+    var seen = {};
+    var regex = /href=["']([^"']*\/redirect\/[^"']+)["']/gi;
+    var match;
+
+    while ((match = regex.exec(html)) !== null) {
+        var raw = match[1];
+        var url = resolveAgainst(raw, BASE_URL);
+
+        if (!url || seen[url]) continue;
+        seen[url] = true;
+
+        // Inspect a small nearby HTML chunk for provider labels such as
+        // title="VOE", class="icon VOE", etc.
+        var start = Math.max(0, match.index - 500);
+        var end = Math.min(html.length, regex.lastIndex + 500);
+        var nearby = html.substring(start, end);
+
+        var title = "";
+
+        var titleMatch = nearby.match(
+            /(?:title|data-provider|data-hoster)=["']([^"']{2,40})["']/i
+        );
+
+        if (titleMatch) {
+            title = cleanText(titleMatch[1]);
+        }
+
+        if (!title) {
+            var iconMatch = nearby.match(
+                /class=["'][^"']*\b(?:VOE|Vidmoly|Filemoon|Doodstream|Dood|Streamtape)\b[^"']*["']/i
+            );
+
+            if (iconMatch) {
+                var nameMatch = iconMatch[0].match(
+                    /\b(VOE|Vidmoly|Filemoon|Doodstream|Dood|Streamtape)\b/i
+                );
+                if (nameMatch) title = nameMatch[1];
+            }
+        }
+
+        result.push({
+            url: url,
+            title: title || "AniWorld Hoster"
+        });
+    }
+
+    return result;
+}
+
+async function fetchPageFollowingRedirects(url, options, maxHops) {
+    var currentUrl = url;
+    var hops = typeof maxHops === "number" ? maxHops : 4;
+    var lastHtml = "";
+
+    for (var i = 0; i <= hops; i++) {
+        var response = await soraFetch(currentUrl, options || {});
+        if (!response) {
+            return {
+                html: lastHtml,
+                finalUrl: currentUrl
+            };
+        }
+
+        var location = getHeaderValue(response.headers, "location");
+
+        if (location) {
+            currentUrl = resolveAgainst(location, currentUrl);
+            continue;
+        }
+
+        var html = await readText(response);
+        lastHtml = html;
+
+        var responseUrl = "";
+        try {
+            if (response.url && typeof response.url === "string") {
+                responseUrl = response.url;
+            }
+        } catch (e) {}
+
+        if (responseUrl) {
+            currentUrl = responseUrl;
+        }
+
+        // Follow simple, unobfuscated navigation redirects only.
+        var pageRedirect = extractSimplePageRedirect(html);
+        if (pageRedirect) {
+            var nextUrl = resolveAgainst(pageRedirect, currentUrl);
+
+            if (nextUrl && nextUrl !== currentUrl) {
+                currentUrl = nextUrl;
+                continue;
+            }
+        }
+
+        return {
+            html: html,
+            finalUrl: currentUrl
+        };
+    }
+
+    return {
+        html: lastHtml,
+        finalUrl: currentUrl
+    };
+}
+
+function getHeaderValue(headers, name) {
+    if (!headers) return "";
+
+    var wanted = String(name || "").toLowerCase();
+
+    try {
+        if (typeof headers.get === "function") {
+            return headers.get(name) || headers.get(wanted) || "";
+        }
+    } catch (e) {}
+
+    for (var key in headers) {
+        if (
+            Object.prototype.hasOwnProperty.call(headers, key) &&
+            String(key).toLowerCase() === wanted
+        ) {
+            return String(headers[key] || "");
+        }
+    }
+
+    return "";
+}
+
+function extractSimplePageRedirect(html) {
+    if (!html) return "";
+
+    // Meta refresh.
+    var meta = html.match(
+        /<meta\b[^>]*http-equiv=["']?refresh["']?[^>]*content=["'][^"']*url\s*=\s*([^"'>\s]+)[^"']*["'][^>]*>/i
+    );
+    if (meta && meta[1]) return decodeHtml(meta[1]);
+
+    // Straightforward window/location assignment. Intentionally does not
+    // evaluate packed/obfuscated JavaScript.
+    var js = html.match(
+        /(?:window\.)?location(?:\.href)?\s*=\s*["']([^"']+)["']/i
+    );
+    if (js && js[1]) return decodeHtml(js[1]);
+
+    var replace = html.match(
+        /location\.replace\(\s*["']([^"']+)["']\s*\)/i
+    );
+    if (replace && replace[1]) return decodeHtml(replace[1]);
+
+    return "";
+}
+
+function extractDirectPublicMediaUrls(html, baseUrl) {
     if (!html) return [];
 
     var normalized = String(html)
         .replace(/\\\//g, "/")
         .replace(/\\u0026/gi, "&")
+        .replace(/\\u003d/gi, "=")
         .replace(/&amp;/gi, "&");
 
     var candidates = [];
+    var match;
 
+    // Absolute media URLs.
     var absoluteRegex =
         /https?:\/\/[^"'\\\s<>]+?\.(?:m3u8|mp4)(?:\?[^"'\\\s<>]*)?/gi;
-
-    var match;
 
     while ((match = absoluteRegex.exec(normalized)) !== null) {
         candidates.push(match[0]);
     }
 
-    var relativeRegex =
-        /["'](\/[^"'\\\s<>]+?\.(?:m3u8|mp4)(?:\?[^"'\\\s<>]*)?)["']/gi;
+    // Root-relative / path-relative media URLs.
+    var quotedMediaRegex =
+        /["']([^"']+?\.(?:m3u8|mp4)(?:\?[^"']*)?)["']/gi;
 
-    while ((match = relativeRegex.exec(normalized)) !== null) {
-        candidates.push(absoluteUrl(match[1]));
+    while ((match = quotedMediaRegex.exec(normalized)) !== null) {
+        var candidate = match[1];
+
+        if (/^https?:\/\//i.test(candidate)) {
+            candidates.push(candidate);
+        } else {
+            candidates.push(resolveAgainst(candidate, baseUrl || BASE_URL));
+        }
     }
 
     candidates = uniqueStrings(candidates);
@@ -561,4 +859,38 @@ function validateStreamUrl(url) {
 
     return /^https?:\/\//i.test(url) &&
         /\.(?:m3u8|mp4)(?:\?|$)/i.test(url);
+}
+
+function getOrigin(url) {
+    var match = String(url || "").match(/^(https?:\/\/[^\/]+)/i);
+    return match ? match[1] : BASE_URL;
+}
+
+function resolveAgainst(value, base) {
+    if (!value) return "";
+
+    value = decodeHtml(String(value).trim());
+    base = String(base || BASE_URL);
+
+    if (/^https?:\/\//i.test(value)) return value;
+
+    if (value.indexOf("//") === 0) {
+        var scheme = /^http:\/\//i.test(base) ? "http:" : "https:";
+        return scheme + value;
+    }
+
+    var origin = getOrigin(base);
+
+    if (value.charAt(0) === "/") {
+        return origin + value;
+    }
+
+    var cleanBase = base.split("#")[0].split("?")[0];
+    var slash = cleanBase.lastIndexOf("/");
+    var directory =
+        slash > cleanBase.indexOf("://") + 2
+            ? cleanBase.substring(0, slash + 1)
+            : cleanBase + "/";
+
+    return directory + value;
 }
