@@ -1,0 +1,24 @@
+{
+  "sourceName": "s.to (GER DUB) SerienStream Fix",
+  "iconUrl": "https://git.luna-app.eu/Cufiy/sora-modules/raw/branch/main/modules/s.to/sto.png",
+  "iconURL": "https://git.luna-app.eu/Cufiy/sora-modules/raw/branch/main/modules/s.to/sto.png",
+  "author": {
+    "name": "Sohailzm",
+    "icon": "https://files.catbox.moe/ttj4fc.gif",
+    "iconURL": "https://files.catbox.moe/ttj4fc.gif"
+  },
+  "version": "1.7.5",
+  "language": "German (DUB)",
+  "streamType": "HLS",
+  "quality": "720p",
+  "baseUrl": "https://serienstream.to",
+  "searchBaseUrl": "https://serienstream.to/suche?term=%s",
+  "scriptUrl": "https://raw.githubusercontent.com/sohailzmn/sora-modules/refs/heads/main/sToGerDub_Serienstream_v13.js",
+  "scriptURL": "https://raw.githubusercontent.com/sohailzmn/sora-modules/refs/heads/main/sToGerDub_Serienstream_v13.js",
+  "asyncJS": true,
+  "streamAsyncJS": true,
+  "softsub": false,
+  "type": "shows",
+  "supportsSora": true,
+  "supportsLuna": true
+}
