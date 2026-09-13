@@ -1,5 +1,5 @@
 {
-  "sourceName": "s.to (GER DUB) IP Fix",
+  "sourceName": "s.to (GER DUB) SerienStream Fix",
   "iconUrl": "https://git.luna-app.eu/Cufiy/sora-modules/raw/branch/main/modules/s.to/sto.png",
   "iconURL": "https://git.luna-app.eu/Cufiy/sora-modules/raw/branch/main/modules/s.to/sto.png",
   "author": {
@@ -7,14 +7,14 @@
     "icon": "https://files.catbox.moe/ttj4fc.gif",
     "iconURL": "https://files.catbox.moe/ttj4fc.gif"
   },
-  "version": "1.2.0",
+  "version": "1.3.0",
   "language": "German (DUB)",
   "streamType": "HLS",
   "quality": "720p",
-  "baseUrl": "http://186.2.175.5",
-  "searchBaseUrl": "http://186.2.175.5/suche?term=%s&tab=shows",
-  "scriptUrl": "https://raw.githubusercontent.com/sohailzmn/sora-modules/refs/heads/main/sToGerDub_IP_v3.js",
-  "scriptURL": "https://raw.githubusercontent.com/sohailzmn/sora-modules/refs/heads/main/sToGerDub_IP_v3.js",
+  "baseUrl": "https://serienstream.to",
+  "searchBaseUrl": "https://serienstream.to/suche?term=%s",
+  "scriptUrl": "https://raw.githubusercontent.com/sohailzmn/sora-modules/refs/heads/main/sToGerDub_Serienstream_v4.js",
+  "scriptURL": "https://raw.githubusercontent.com/sohailzmn/sora-modules/refs/heads/main/sToGerDub_Serienstream_v4.js",
   "asyncJS": true,
   "streamAsyncJS": false,
   "softsub": false,
