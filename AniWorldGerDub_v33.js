@@ -1,5 +1,5 @@
 const BASE_URL = "https://aniworld.to";
-const BASE_SCRIPT_URL = "https://raw.githubusercontent.com/sohailzmn/sora-modules/refs/heads/main/AniWorldGerDub_v32.js";
+const BASE_SCRIPT_URL = "https://git.luna-app.eu/Cufiy/sora-modules/raw/branch/main/modules/aniworld/v2/AniWorldGerDub_v2.js";
 
 var __baseLoaded = false;
 var __baseDetails = null;
@@ -22,7 +22,7 @@ async function __requestText(url, options) {
     try {
       response = await fetch(url, options);
     } catch (e2) {
-      console.log("[AniWorld v3.3] request failed:", url, e2);
+      console.log("[AniWorld v3.3.1] request failed:", url, e2);
       return "";
     }
   }
@@ -81,26 +81,26 @@ async function __ensureBase() {
 
   var source = await __requestText(BASE_SCRIPT_URL, { headers: { "Accept": "text/plain" } });
   if (!source) {
-    console.log("[AniWorld v3.3] base script could not be loaded");
+    console.log("[AniWorld v3.3.1] original resolver script could not be loaded");
     return false;
   }
 
   try {
     source = source
-      .replace(/async\s+function\s+searchResults\s*\(/, "async function __v32_searchResults(")
-      .replace(/async\s+function\s+extractDetails\s*\(/, "async function __v32_extractDetails(")
-      .replace(/async\s+function\s+extractEpisodes\s*\(/, "async function __v32_extractEpisodes(")
-      .replace(/async\s+function\s+extractStreamUrl\s*\(/, "async function __v32_extractStreamUrl(");
+      .replace(/async\s+function\s+searchResults\s*\(/, "async function __legacy_searchResults(")
+      .replace(/async\s+function\s+extractDetails\s*\(/, "async function __legacy_extractDetails(")
+      .replace(/async\s+function\s+extractEpisodes\s*\(/, "async function __legacy_extractEpisodes(")
+      .replace(/async\s+function\s+extractStreamUrl\s*\(/, "async function __legacy_extractStreamUrl(");
 
     eval(source);
 
-    if (typeof __v32_extractDetails === "function") __baseDetails = __v32_extractDetails;
-    if (typeof __v32_extractStreamUrl === "function") __baseStream = __v32_extractStreamUrl;
+    if (typeof __legacy_extractDetails === "function") __baseDetails = __legacy_extractDetails;
+    if (typeof __legacy_extractStreamUrl === "function") __baseStream = __legacy_extractStreamUrl;
 
     __baseLoaded = !!(__baseDetails && __baseStream);
     return __baseLoaded;
   } catch (error) {
-    console.log("[AniWorld v3.3] base eval failed:", error);
+    console.log("[AniWorld v3.3.1] legacy resolver eval failed:", error);
     return false;
   }
 }
@@ -127,10 +127,10 @@ async function searchResults(keyword) {
       });
     }
 
-    console.log("[AniWorld v3.3] search results:", results.length);
+    console.log("[AniWorld v3.3.1] search results:", results.length);
     return JSON.stringify(results);
   } catch (error) {
-    console.log("[AniWorld v3.3] search error:", error);
+    console.log("[AniWorld v3.3.1] search error:", error);
     return JSON.stringify([]);
   }
 }
@@ -139,7 +139,7 @@ async function extractDetails(url) {
   try {
     if (await __ensureBase()) return await __baseDetails(url);
   } catch (error) {
-    console.log("[AniWorld v3.3] details error:", error);
+    console.log("[AniWorld v3.3.1] details error:", error);
   }
   return JSON.stringify([{ description: "", aliases: "", airdate: "" }]);
 }
@@ -190,10 +190,10 @@ async function extractEpisodes(url) {
       for (var j = 0; j < seasonEpisodes.length; j++) episodes.push(seasonEpisodes[j]);
     }
 
-    console.log("[AniWorld v3.3] episodes:", episodes.length, "seasons:", seasonUrls.length);
+    console.log("[AniWorld v3.3.1] episodes:", episodes.length, "seasons:", seasonUrls.length);
     return JSON.stringify(episodes);
   } catch (error) {
-    console.log("[AniWorld v3.3] episodes error:", error);
+    console.log("[AniWorld v3.3.1] episodes error:", error);
     return JSON.stringify([]);
   }
 }
@@ -202,7 +202,7 @@ async function extractStreamUrl(url) {
   try {
     if (await __ensureBase()) return await __baseStream(url);
   } catch (error) {
-    console.log("[AniWorld v3.3] stream error:", error);
+    console.log("[AniWorld v3.3.1] stream error:", error);
   }
   return JSON.stringify({ streams: [], subtitles: [] });
 }
