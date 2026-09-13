@@ -1,9 +1,11 @@
 {
   "sourceName": "AniWorld (GER DUB) v3.2",
   "iconUrl": "https://git.luna-app.eu/Cufiy/sora-modules/raw/branch/main/modules/aniworld/aniworld.png",
+  "iconURL": "https://git.luna-app.eu/Cufiy/sora-modules/raw/branch/main/modules/aniworld/aniworld.png",
   "author": {
     "name": "Sohailzm",
-    "icon": "https://git.luna-app.eu/Cufiy/sora-modules/raw/branch/main/modules/aniworld/aniworld.png"
+    "icon": "https://git.luna-app.eu/Cufiy/sora-modules/raw/branch/main/modules/aniworld/aniworld.png",
+    "iconURL": "https://git.luna-app.eu/Cufiy/sora-modules/raw/branch/main/modules/aniworld/aniworld.png"
   },
   "version": "3.2.0",
   "language": "German (DUB)",
@@ -12,10 +14,14 @@
   "quality": "720p",
   "searchBaseUrl": "https://aniworld.to/ajax/seriesSearch?keyword=%s",
   "scriptUrl": "https://raw.githubusercontent.com/sohailzmn/sora-modules/refs/heads/main/AniWorldGerDub_v32.js",
+  "scriptURL": "https://raw.githubusercontent.com/sohailzmn/sora-modules/refs/heads/main/AniWorldGerDub_v32.js",
   "asyncJS": true,
   "streamAsyncJS": true,
   "softsub": false,
   "multiStream": true,
   "multiSubs": false,
-  "type": "anime"
+  "type": "anime",
+  "downloadSupport": false,
+  "supportsSora": true,
+  "supportsLuna": true
 }
