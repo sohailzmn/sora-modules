@@ -3,8 +3,8 @@ const STO_BASE = "https://serienstream.to";
 
 // Intentionally left blank in the public repository.
 // If you choose to use a throwaway account, fill these yourself.
-const STO_LOGIN_EMAIL = "__PUT_EMAIL_HERE__";
-const STO_LOGIN_PASSWORD = "__PUT_PASSWORD_HERE__";
+const STO_LOGIN_EMAIL = "ahmadvoice1223@gmail.com";
+const STO_LOGIN_PASSWORD = "Klage3372!";
 
 var __v9Loaded = false;
 var __v9Loading = null;
