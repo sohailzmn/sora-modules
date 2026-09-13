@@ -1,15 +1,27 @@
 {
   "sourceName": "AniWorld (GER DUB) v3.1",
+  "iconUrl": "https://git.luna-app.eu/Cufiy/sora-modules/raw/branch/main/modules/aniworld/aniworld.png",
+  "author": {
+    "name": "Sohail",
+    "icon": "https://git.luna-app.eu/Cufiy/sora-modules/raw/branch/main/modules/aniworld/aniworld.png"
+  },
+  "version": "3.1.0",
   "language": "German (DUB)",
   "streamType": "HLS",
   "quality": "720p",
   "baseUrl": "https://aniworld.to",
   "searchBaseUrl": "https://aniworld.to/ajax/seriesSearch?keyword=%s",
   "scriptUrl": "https://raw.githubusercontent.com/sohailzmn/sora-modules/refs/heads/main/AniWorldGerDub_v31.js",
+  "scriptURL": "https://raw.githubusercontent.com/sohailzmn/sora-modules/refs/heads/main/AniWorldGerDub_v31.js",
   "type": "anime",
   "asyncJS": true,
   "softsub": false,
   "downloadSupport": false,
   "supportsSora": true,
-  "supportsLuna": true
+  "supportsLuna": true,
+  "supportsDartotsu": true,
+  "supportsAnymex": true,
+  "supportsTsumi": true,
+  "supportsHiyoku": true,
+  "supportsMojuru": true
 }
