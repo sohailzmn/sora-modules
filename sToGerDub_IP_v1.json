@@ -1,0 +1,24 @@
+{
+  "sourceName": "s.to (GER DUB) IP Fix",
+  "iconUrl": "https://git.luna-app.eu/Cufiy/sora-modules/raw/branch/main/modules/s.to/sto.png",
+  "iconURL": "https://git.luna-app.eu/Cufiy/sora-modules/raw/branch/main/modules/s.to/sto.png",
+  "author": {
+    "name": "Sohailzm",
+    "icon": "https://files.catbox.moe/ttj4fc.gif",
+    "iconURL": "https://files.catbox.moe/ttj4fc.gif"
+  },
+  "version": "1.0.0",
+  "language": "German (DUB)",
+  "streamType": "HLS",
+  "quality": "720p",
+  "baseUrl": "http://186.2.175.5",
+  "searchBaseUrl": "http://186.2.175.5/ajax/seriesSearch?keyword=%s",
+  "scriptUrl": "https://raw.githubusercontent.com/sohailzmn/sora-modules/refs/heads/main/sToGerDub_IP_v1.js",
+  "scriptURL": "https://raw.githubusercontent.com/sohailzmn/sora-modules/refs/heads/main/sToGerDub_IP_v1.js",
+  "asyncJS": true,
+  "streamAsyncJS": false,
+  "softsub": false,
+  "type": "shows",
+  "supportsSora": true,
+  "supportsLuna": true
+}
