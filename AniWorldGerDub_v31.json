@@ -5,7 +5,7 @@
   "quality": "720p",
   "baseUrl": "https://aniworld.to",
   "searchBaseUrl": "https://aniworld.to/ajax/seriesSearch?keyword=%s",
-  "scriptUrl": "https://git.luna-app.eu/Cufiy/sora-modules/raw/branch/main/modules/aniworld/AniWorldGerDub_v3.js",
+  "scriptUrl": "http://raw.githubusercontent.com/sohailzmn/sora-modules/refs/heads/main/AniWorldGerDub_v31.js",
   "type": "anime",
   "asyncJS": true,
   "softsub": false,
