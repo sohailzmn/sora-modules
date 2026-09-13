@@ -5,7 +5,7 @@
     "name": "Sohail",
     "iconURL": "https://git.luna-app.eu/Cufiy/sora-modules/raw/branch/main/modules/aniworld/aniworld.png"
   },
-  "version": "3.1.0",
+  "version": "3.2.0",
   "language": "German (DUB)",
   "scriptURL": "https://raw.githubusercontent.com/sohailzmn/sora-modules/refs/heads/main/AniWorldGerDub_v32.js",
   "baseUrl": "https://aniworld.to"
