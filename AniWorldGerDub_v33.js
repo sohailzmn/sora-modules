@@ -1,5 +1,5 @@
 const BASE_URL = "https://aniworld.to";
-const BASE_SCRIPT_URL = "https://git.luna-app.eu/Cufiy/sora-modules/raw/branch/main/modules/aniworld/v2/AniWorldGerDub_v2.js";
+const BASE_SCRIPT_URL = "https://raw.githubusercontent.com/sohailzmn/sora-modules/main/AniWorldGerDub_v32.js";
 
 var __baseLoaded = false;
 var __baseDetails = null;
@@ -22,7 +22,7 @@ async function __requestText(url, options) {
     try {
       response = await fetch(url, options);
     } catch (e2) {
-      console.log("[AniWorld v3.3.1] request failed:", url, e2);
+      console.log("[AniWorld v3.3.2] request failed:", url, e2);
       return "";
     }
   }
@@ -81,7 +81,7 @@ async function __ensureBase() {
 
   var source = await __requestText(BASE_SCRIPT_URL, { headers: { "Accept": "text/plain" } });
   if (!source) {
-    console.log("[AniWorld v3.3.1] original resolver script could not be loaded");
+    console.log("[AniWorld v3.3.2] original resolver script could not be loaded");
     return false;
   }
 
@@ -100,7 +100,7 @@ async function __ensureBase() {
     __baseLoaded = !!(__baseDetails && __baseStream);
     return __baseLoaded;
   } catch (error) {
-    console.log("[AniWorld v3.3.1] legacy resolver eval failed:", error);
+    console.log("[AniWorld v3.3.2] legacy resolver eval failed:", error);
     return false;
   }
 }
@@ -127,10 +127,10 @@ async function searchResults(keyword) {
       });
     }
 
-    console.log("[AniWorld v3.3.1] search results:", results.length);
+    console.log("[AniWorld v3.3.2] search results:", results.length);
     return JSON.stringify(results);
   } catch (error) {
-    console.log("[AniWorld v3.3.1] search error:", error);
+    console.log("[AniWorld v3.3.2] search error:", error);
     return JSON.stringify([]);
   }
 }
@@ -139,7 +139,7 @@ async function extractDetails(url) {
   try {
     if (await __ensureBase()) return await __baseDetails(url);
   } catch (error) {
-    console.log("[AniWorld v3.3.1] details error:", error);
+    console.log("[AniWorld v3.3.2] details error:", error);
   }
   return JSON.stringify([{ description: "", aliases: "", airdate: "" }]);
 }
@@ -190,10 +190,10 @@ async function extractEpisodes(url) {
       for (var j = 0; j < seasonEpisodes.length; j++) episodes.push(seasonEpisodes[j]);
     }
 
-    console.log("[AniWorld v3.3.1] episodes:", episodes.length, "seasons:", seasonUrls.length);
+    console.log("[AniWorld v3.3.2] episodes:", episodes.length, "seasons:", seasonUrls.length);
     return JSON.stringify(episodes);
   } catch (error) {
-    console.log("[AniWorld v3.3.1] episodes error:", error);
+    console.log("[AniWorld v3.3.2] episodes error:", error);
     return JSON.stringify([]);
   }
 }
@@ -202,7 +202,7 @@ async function extractStreamUrl(url) {
   try {
     if (await __ensureBase()) return await __baseStream(url);
   } catch (error) {
-    console.log("[AniWorld v3.3.1] stream error:", error);
+    console.log("[AniWorld v3.3.2] stream error:", error);
   }
   return JSON.stringify({ streams: [], subtitles: [] });
 }
