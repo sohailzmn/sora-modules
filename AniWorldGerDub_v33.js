@@ -199,11 +199,11 @@ async function extractEpisodes(url) {
 }
 
 
-// v3.3.3: The episode exists but the old fetch-only resolver often sees no media
+// v3.3.4: The episode exists but the old fetch-only resolver often sees no media
 // in hoster pages. Shirox networkFetch observes real browser/player requests.
 function __awLog(message) {
-  if (typeof console !== "undefined" && typeof console.warn === "function") console.warn("[AniWorld v3.3.3] " + message);
-  else if (typeof console !== "undefined" && typeof console.log === "function") console.log("[AniWorld v3.3.3] " + message);
+  if (typeof console !== "undefined" && typeof console.warn === "function") console.warn("[AniWorld v3.3.4] " + message);
+  else if (typeof console !== "undefined" && typeof console.log === "function") console.log("[AniWorld v3.3.4] " + message);
 }
 function __awAttr(tag, key) {
   var re = new RegExp("(?:^|\\s)" + key.replace(/[-]/g, "\\-") + "\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s>]+))", "i");
@@ -289,24 +289,28 @@ function __awCandidates(capture, pageUrl) {
   return urls;
 }
 async function __awVerify(url, page) {
-  var referer = __awOrigin(page) + "/";
-  var headers = { Referer: referer, Origin: __awOrigin(page) };
   if (typeof fetchv2 !== "function" && typeof fetch !== "function") return null;
-  try {
-    var response = typeof fetchv2 === "function"
-      ? await fetchv2(url, headers, __awMediaKind(url) === "mp4" ? "HEAD" : "GET", null)
-      : await fetch(url, { headers: headers, method: __awMediaKind(url) === "mp4" ? "HEAD" : "GET" });
-    if (!response || typeof response === "string" || (typeof response.status === "number" && (response.status < 200 || response.status >= 300))) return null;
-    if (__awMediaKind(url) === "hls") {
-      var body = await response.text();
-      if (!/^#EXTM3U(?:\r?\n|$)/.test(String(body || "").replace(/^\uFEFF/, "").trim())) return null;
-    } else {
-      var mime = response.headers && (typeof response.headers.get === "function" ? response.headers.get("content-type") :
-        response.headers["content-type"] || response.headers["Content-Type"]) || "";
-      if (!/^video\//i.test(String(mime))) return null;
-    }
-    return { title: "GER DUB", streamUrl: url, headers: headers };
-  } catch (error) { return null; }
+  var headersList = [{ Referer: __awOrigin(page) + "/", Origin: __awOrigin(page) },
+                     { Referer: BASE_URL + "/" }, {}];
+  for (var h = 0; h < headersList.length; h++) {
+    var headers = headersList[h];
+    try {
+      var response = typeof fetchv2 === "function"
+        ? await fetchv2(url, headers, __awMediaKind(url) === "mp4" ? "HEAD" : "GET", null)
+        : await fetch(url, { headers: headers, method: __awMediaKind(url) === "mp4" ? "HEAD" : "GET" });
+      if (!response || typeof response === "string" || (typeof response.status === "number" && (response.status < 200 || response.status >= 300))) continue;
+      if (__awMediaKind(url) === "hls") {
+        var body = await response.text();
+        if (!/^#EXTM3U(?:\r?\n|$)/.test(String(body || "").replace(/^\uFEFF/, "").trim())) continue;
+      } else {
+        var mime = response.headers && (typeof response.headers.get === "function" ? response.headers.get("content-type") :
+          response.headers["content-type"] || response.headers["Content-Type"]) || "";
+        if (!/^video\//i.test(String(mime))) continue;
+      }
+      return { title: "GER DUB", streamUrl: url, headers: headers };
+    } catch (error) { /* Try the next referer policy. */ }
+  }
+  return null;
 }
 async function __awCapture(provider) {
   if (typeof networkFetch !== "function") return null;
@@ -322,8 +326,18 @@ async function __awCapture(provider) {
     __awLog("Web player failed: " + provider.title);
     return null;
   }
-  // On redirect, the returned document may be at a provider host.
-  var page = result.finalUrl || result.url || provider.url;
+  // Shirox's networkFetch returns the ORIGINAL URL, not the final redirected URL.
+  // Infer the video host from captured navigation requests for correct media Referer.
+  var requests = Array.isArray(result.requests) ? result.requests : [];
+  var page = provider.url;
+  for (var p = 0; p < requests.length; p++) {
+    var seen = typeof requests[p] === "string" ? requests[p] : requests[p] && (requests[p].url || requests[p].requestUrl);
+    if (seen && __awPublic(seen) && !/^https:\/\/aniworld\.to\//i.test(seen) &&
+        /(voe|vidmoly|filemoon|loadx|luluvdo)/i.test(__awOrigin(seen)) && !__awMediaKind(seen)) {
+      page = seen;
+      break;
+    }
+  }
   var urls = __awCandidates(result, page);
   __awLog(provider.title + " player yielded " + urls.length + " media URL candidates");
   for (var i = 0; i < Math.min(urls.length, 4); i++) {
