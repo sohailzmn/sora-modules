@@ -198,11 +198,169 @@ async function extractEpisodes(url) {
   }
 }
 
-async function extractStreamUrl(url) {
-  try {
-    if (await __ensureBase()) return await __baseStream(url);
-  } catch (error) {
-    console.log("[AniWorld v3.3.2] stream error:", error);
+
+// v3.3.3: The episode exists but the old fetch-only resolver often sees no media
+// in hoster pages. Shirox networkFetch observes real browser/player requests.
+function __awLog(message) {
+  if (typeof console !== "undefined" && typeof console.warn === "function") console.warn("[AniWorld v3.3.3] " + message);
+  else if (typeof console !== "undefined" && typeof console.log === "function") console.log("[AniWorld v3.3.3] " + message);
+}
+function __awAttr(tag, key) {
+  var re = new RegExp("(?:^|\\s)" + key.replace(/[-]/g, "\\-") + "\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s>]+))", "i");
+  var match = String(tag || "").match(re);
+  return match ? (match[1] !== undefined ? match[1] : match[2] !== undefined ? match[2] : match[3]) : "";
+}
+function __awOrigin(url) {
+  var m = String(url || "").match(/^https?:\/\/[^/]+/i);
+  return m ? m[0] : BASE_URL;
+}
+function __awAbsolute(path, base) {
+  path = String(path || "").trim().replace(/&amp;/g, "&").replace(/\\\//g, "/");
+  if (/^https?:\/\//i.test(path)) return path;
+  if (/^\/\//.test(path)) return "https:" + path;
+  if (/^[a-z][\w+.-]*:/i.test(path)) return "";
+  if (!path) return "";
+  if (path[0] === "/") return __awOrigin(base) + path;
+  return String(base || BASE_URL + "/").replace(/[^/]*$/, "") + path;
+}
+function __awPublic(url) {
+  var m = String(url || "").match(/^https?:\/\/([^/?#]+)/i);
+  if (!m || /[@\[\]\s\\]/.test(m[1])) return false;
+  var host = m[1].split(":")[0].toLowerCase();
+  return host.indexOf(".") >= 0 && host !== "localhost" &&
+    !/^(?:127|10|0|192\.168|169\.254)\./.test(host) &&
+    !/^172\.(?:1[6-9]|2\d|3[01])\./.test(host);
+}
+function __awMediaKind(url) {
+  var path = String(url || "").split(/[?#]/)[0];
+  if (/\.m3u8$/i.test(path)) return "hls";
+  if (/\.mp4$/i.test(path)) return "mp4";
+  return "";
+}
+function __awHosters(html) {
+  var flags = {};
+  var imgs = String(html || "").match(/<img\b[^>]*>/gi) || [];
+  for (var i = 0; i < imgs.length; i++) {
+    var key = __awAttr(imgs[i], "data-lang-key"), title = __awAttr(imgs[i], "title") || __awAttr(imgs[i], "alt");
+    if (key && title) flags[key] = title;
   }
+  var out = [], seen = {};
+  var list = String(html || "").match(/<li\b[^>]*data-lang-key\s*=\s*["'][^"']+["'][\s\S]*?<\/li>/gi) || [];
+  for (var j = 0; j < list.length; j++) {
+    var li = list[j], open = (li.match(/^<li\b[^>]*>/i) || [""])[0];
+    var langKey = __awAttr(open, "data-lang-key");
+    var language = flags[langKey] || (langKey === "1" ? "Deutsch" : "");
+    if (!/(deutsch|german|ger dub)/i.test(language) || /(untertitel|sub)/i.test(language)) continue;
+    var link = (li.match(/<a\b[^>]*href\s*=\s*["']([^"']+)["']/i) || [])[1];
+    var url = __awAbsolute(link, BASE_URL + "/");
+    if (!url || !/^https:\/\/aniworld\.to\/redirect\//i.test(url) || seen[url]) continue;
+    seen[url] = true;
+    var hoster = (li.match(/<h4\b[^>]*>([\s\S]*?)<\/h4>/i) || [])[1] || "Video";
+    hoster = hoster.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim();
+    out.push({ url: url, title: hoster });
+  }
+  var order = { voe: 0, vidmoly: 1, filemoon: 2, loadx: 3, luluvdo: 4 };
+  out.sort(function(a,b) {
+    var x = a.title.toLowerCase(), y = b.title.toLowerCase();
+    var ax = order[x] === undefined ? 10 : order[x];
+    var by = order[y] === undefined ? 10 : order[y];
+    return ax - by;
+  });
+  return out;
+}
+function __awCandidates(capture, pageUrl) {
+  var inputs = Array.isArray(capture && capture.requests) ? capture.requests.slice() : [];
+  if (capture && capture.cutoffUrl) inputs.push(capture.cutoffUrl);
+  var html = String(capture && capture.html || "");
+  var tags = html.match(/<(?:video|source)\b[^>]*>/gi) || [];
+  for (var j = 0; j < tags.length; j++) inputs.push(__awAttr(tags[j], "src") || __awAttr(tags[j], "data-src"));
+  // Some players expose the HLS file in a JS config without emitting a request.
+  var js = /(?:["']?(?:file|src|source|hls)["']?\s*:\s*["'])(https?:[^"'<>]+?\.(?:m3u8|mp4)(?:\?[^"'<>]*)?)/gi, match;
+  while ((match = js.exec(html)) !== null) inputs.push(match[1]);
+  var seen = {}, urls = [];
+  for (var i = 0; i < inputs.length; i++) {
+    var item = inputs[i], raw = typeof item === "string" ? item : item && (item.url || item.requestUrl);
+    var url = __awAbsolute(raw, pageUrl);
+    if (!url || !__awPublic(url) || !__awMediaKind(url) || /doubleclick|googlesyndication|\/preroll\//i.test(url) || seen[url]) continue;
+    seen[url] = true;
+    urls.push(url);
+  }
+  urls.sort(function(a, b) { return (__awMediaKind(a) === "hls" ? 0 : 1) - (__awMediaKind(b) === "hls" ? 0 : 1); });
+  return urls;
+}
+async function __awVerify(url, page) {
+  var referer = __awOrigin(page) + "/";
+  var headers = { Referer: referer, Origin: __awOrigin(page) };
+  if (typeof fetchv2 !== "function" && typeof fetch !== "function") return null;
+  try {
+    var response = typeof fetchv2 === "function"
+      ? await fetchv2(url, headers, __awMediaKind(url) === "mp4" ? "HEAD" : "GET", null)
+      : await fetch(url, { headers: headers, method: __awMediaKind(url) === "mp4" ? "HEAD" : "GET" });
+    if (!response || typeof response === "string" || (typeof response.status === "number" && (response.status < 200 || response.status >= 300))) return null;
+    if (__awMediaKind(url) === "hls") {
+      var body = await response.text();
+      if (!/^#EXTM3U(?:\r?\n|$)/.test(String(body || "").replace(/^\uFEFF/, "").trim())) return null;
+    } else {
+      var mime = response.headers && (typeof response.headers.get === "function" ? response.headers.get("content-type") :
+        response.headers["content-type"] || response.headers["Content-Type"]) || "";
+      if (!/^video\//i.test(String(mime))) return null;
+    }
+    return { title: "GER DUB", streamUrl: url, headers: headers };
+  } catch (error) { return null; }
+}
+async function __awCapture(provider) {
+  if (typeof networkFetch !== "function") return null;
+  // The module only navigates an AniWorld link that was listed for German audio.
+  var result = await networkFetch(provider.url, {
+    timeoutSeconds: 14, returnHTML: true, returnCookies: false,
+    headers: { Referer: BASE_URL + "/" },
+    waitForSelectors: ["video", "source"],
+    clickSelectors: [".vjs-big-play-button", ".jw-icon-display", "button[aria-label='Play']", ".art-icon-play[aria-label='Play']"],
+    maxWaitTime: 4
+  });
+  if (!result || result.success === false) {
+    __awLog("Web player failed: " + provider.title);
+    return null;
+  }
+  // On redirect, the returned document may be at a provider host.
+  var page = result.finalUrl || result.url || provider.url;
+  var urls = __awCandidates(result, page);
+  __awLog(provider.title + " player yielded " + urls.length + " media URL candidates");
+  for (var i = 0; i < Math.min(urls.length, 4); i++) {
+    var verified = await __awVerify(urls[i], page);
+    if (verified) { verified.title = provider.title + " · GER DUB"; return verified; }
+  }
+  return null;
+}
+async function extractStreamUrl(url) {
+  var fallback = null;
+  try {
+    var page = await __requestText(url, {
+      headers: { Accept: "text/html,application/xhtml+xml", Referer: BASE_URL + "/" }
+    });
+    if (page) {
+      var providers = __awHosters(page);
+      __awLog("German hosters: " + providers.map(function(x) { return x.title; }).join(", "));
+      if (typeof networkFetch === "function") {
+        for (var i = 0; i < Math.min(providers.length, 4); i++) {
+          try {
+            var stream = await __awCapture(providers[i]);
+            if (stream) return JSON.stringify({ streams: [stream], subtitles: [] });
+          } catch (error) { __awLog("Hoster " + providers[i].title + " failed: " + String(error).slice(0, 130)); }
+        }
+      } else __awLog("No browser capture bridge; trying legacy direct-media lookup.");
+    } else __awLog("Episode page returned no usable HTML");
+    if (await __ensureBase()) {
+      fallback = await __baseStream(url);
+      if (fallback) {
+        try {
+          var parsed = typeof fallback === "string" ? JSON.parse(fallback) : fallback;
+          if (parsed && Array.isArray(parsed.streams) && parsed.streams.length > 0) return typeof fallback === "string" ? fallback : JSON.stringify(fallback);
+        } catch (error) { __awLog("Legacy stream response invalid"); }
+      }
+    }
+  } catch (error) { __awLog("Stream lookup failed: " + String(error).slice(0, 150)); }
+  __awLog("No playable German stream captured for this episode");
+  // Keep module operation nonfatal for Sora's older runtime.
   return JSON.stringify({ streams: [], subtitles: [] });
 }
