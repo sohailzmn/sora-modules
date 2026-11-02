@@ -2,7 +2,7 @@ name: Verify SerienStream search module
 on:
   push:
     paths:
-      - "sToGerDub_Serienstream_v31.js"
+      - "sToGerDub_Serienstream_v32.js"
       - ".github/workflows/verify-serienstream-search.yml"
   workflow_dispatch:
 
@@ -13,14 +13,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Check JavaScript syntax
-        run: node --check sToGerDub_Serienstream_v31.js
+        run: node --check sToGerDub_Serienstream_v32.js
       - name: Test exact results, search fallback, and blocked site reporting
         run: |
           node <<'NODE'
           const assert = require('node:assert/strict');
           const vm = require('node:vm');
           const fs = require('node:fs');
-          const script = fs.readFileSync('sToGerDub_Serienstream_v31.js', 'utf8');
+          const script = fs.readFileSync('sToGerDub_Serienstream_v32.js', 'utf8');
           const titlePage = '<html><h1>Dexter</h1><meta property="og:title" content="Dexter"></html>';
           const searchPage = '<html><main><a href="/serie/dexter"><h3>Dexter</h3></a></main></html>';
           function moduleWith(fetcher) {
@@ -52,6 +52,17 @@ jobs:
               url.includes('/serie/dexter') ? 'Not Found' : '<html><main>Keine Treffer</main></html>'));
             result = JSON.parse(await mod.searchResults('Dexter'));
             assert.deepEqual(result, []);
-            process.stdout.write('All five search tests passed.\n');
+            // A generic 200 HTML response without query results is not a valid empty result.
+            mod = moduleWith(async url => response(200,
+              url.includes('/serie/dexter') ? '<html><title>SerienStream</title></html>' :
+              '<html><title>Suche | SerienStream</title><main>Trending titles</main></html>'));
+            await assert.rejects(mod.searchResults('Dexter'), /keine verwertbaren Suchdaten/);
+
+            // A generic home page instead of the searched title must not mislead users.
+            mod = moduleWith(async () => response(200,
+              '<html><title>SerienStream</title><main>Popular series</main></html>'));
+            await assert.rejects(mod.searchResults('Dexter'), /keine verwertbaren Suchdaten/);
+
+            process.stdout.write('All seven search tests passed.\n');
           })().catch(e => {console.error(e); process.exitCode=1});
           NODE
