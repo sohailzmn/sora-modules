@@ -1,0 +1,57 @@
+name: Verify SerienStream search module
+on:
+  push:
+    paths:
+      - "sToGerDub_Serienstream_v31.js"
+      - ".github/workflows/verify-serienstream-search.yml"
+  workflow_dispatch:
+
+jobs:
+  search-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check JavaScript syntax
+        run: node --check sToGerDub_Serienstream_v31.js
+      - name: Test exact results, search fallback, and blocked site reporting
+        run: |
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          const vm = require('node:vm');
+          const fs = require('node:fs');
+          const script = fs.readFileSync('sToGerDub_Serienstream_v31.js', 'utf8');
+          const titlePage = '<html><h1>Dexter</h1><meta property="og:title" content="Dexter"></html>';
+          const searchPage = '<html><main><a href="/serie/dexter"><h3>Dexter</h3></a></main></html>';
+          function moduleWith(fetcher) {
+            const box = { fetchv2: fetcher, console: { log(){}, warn(){}, error(){} } };
+            vm.createContext(box);
+            vm.runInContext(script, box);
+            return box;
+          }
+          const response = (status, html) => ({status, ok: status >= 200 && status < 300, text: async () => html});
+          (async () => {
+            let mod = moduleWith(async url => response(200, url.endsWith('/serie/dexter') ? titlePage : searchPage));
+            let result = JSON.parse(await mod.searchResults('Dexter'));
+            assert.equal(result[0].title, 'Dexter');
+            assert.equal(result[0].href, 'https://serienstream.to/serie/dexter');
+
+            mod = moduleWith(async url => response(url.includes('/serie/dexter') ? 404 : 200,
+              url.includes('/serie/dexter') ? 'Not Found' : searchPage));
+            result = JSON.parse(await mod.searchResults('Dexter'));
+            assert.equal(result.length, 1);
+            assert.equal(result[0].title, 'Dexter');
+
+            mod = moduleWith(async () => response(403, '<title>Forbidden</title>'));
+            await assert.rejects(mod.searchResults('Dexter'), /SerienStream|HTTP 403/);
+
+            mod = moduleWith(async () => response(200, '<html><title>Just a moment</title><div class="cf-turnstile"></div></html>'));
+            await assert.rejects(mod.searchResults('Dexter'), /Bestätigung|Browser/);
+
+            mod = moduleWith(async url => response(url.includes('/serie/dexter') ? 404 : 200,
+              url.includes('/serie/dexter') ? 'Not Found' : '<html><main>Keine Treffer</main></html>'));
+            result = JSON.parse(await mod.searchResults('Dexter'));
+            assert.deepEqual(result, []);
+            process.stdout.write('All five search tests passed.\n');
+          })().catch(e => {console.error(e); process.exitCode=1});
+          NODE
