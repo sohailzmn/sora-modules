@@ -171,3 +171,25 @@ test("S.to episode list includes validated recent episode when S2 index is empty
  assert.ok(episodes.some(e=>e.href.endsWith("/staffel-2/episode-4")),"most recent verified S2 episode must be present");
  assert.ok(!episodes.some(e=>e.href.endsWith("/staffel-2/episode-5")),"unpublished episode must not be synthesized");
 });
+
+test("unified source reports an access challenge rather than a missing video", async () => {
+  const ctx = instance();
+  ctx.__UNIFIED_SOURCES[1].api.extractStreamUrl = async () => JSON.stringify({
+    streams: [], subtitles: [], blockedReason: "website_verification_required"
+  });
+  const result = JSON.parse(await ctx.extractStreamUrl(
+    "https://serienstream.to/serie/example/staffel-2/episode-6"
+  ));
+  assert.equal(result.blockedReason, "website_verification_required");
+  assert.deepEqual(result.streams, []);
+});
+test("ordinary empty stream result is not mislabeled as a website challenge", async () => {
+  const ctx = instance();
+  ctx.__UNIFIED_SOURCES[1].api.extractStreamUrl = async () => JSON.stringify({
+    streams: [], subtitles: []
+  });
+  const result = JSON.parse(await ctx.extractStreamUrl(
+    "https://serienstream.to/serie/example/staffel-2/episode-6"
+  ));
+  assert.equal(result.blockedReason, undefined);
+});
