@@ -9,6 +9,7 @@ const source = fs.readFileSync(path.join(__dirname, "..", "UnifiedGerman_v1.js")
 function instance() {
   const context = vm.createContext({
     console: { warn() {}, log() {} },
+    setTimeout, clearTimeout,
     fetchv2: async () => { throw new Error("No network in fixture tests"); },
     networkFetch: async () => { throw new Error("No network in fixture tests"); },
     fetch: async () => { throw new Error("No network in fixture tests"); }
@@ -86,4 +87,28 @@ test("SerienStream v2 provider buttons recognise German language id", () => {
   const hosts = context.stoHosters(html);
   assert.equal(hosts.length, 1);
   assert.match(hosts[0].url, /^https:\/\/serienstream\.to\/r\?/);
+});
+
+test("blocked catalogue cannot hold another catalogue's results hostage", async () => {
+  const ctx=instance();
+  ctx.__UNIFIED_SEARCH_TIMEOUT_MS=15;
+  ctx.__UNIFIED_SOURCES[0].api.searchResults=async()=>JSON.stringify([
+    {title:"Kusuriya no Hitorigoto",image:"poster",href:"/anime/stream/kusuriya-no-hitorigoto"}
+  ]);
+  ctx.__UNIFIED_SOURCES[1].api.searchResults=()=>new Promise(()=>{});
+  const began=Date.now();
+  const result=JSON.parse(await ctx.searchResults("Kusuriya no Hitorigoto"));
+  assert.equal(result.length,1);
+  assert.ok(Date.now()-began<1000,"blocked S.to must not hang AniWorld");
+});
+test("stalled episode and stream lookups return bounded empty results", async () => {
+  const ctx=instance();
+  ctx.__UNIFIED_EPISODES_TIMEOUT_MS=15;
+  ctx.__UNIFIED_STREAMS_TIMEOUT_MS=15;
+  ctx.__UNIFIED_SOURCES[0].api.extractEpisodes=()=>new Promise(()=>{});
+  ctx.__UNIFIED_SOURCES[0].api.extractStreamUrl=()=>new Promise(()=>{});
+  const href="https://aniworld.to/anime/stream/example";
+  assert.equal(await ctx.extractEpisodes(href),"[]");
+  const streams=JSON.parse(await ctx.extractStreamUrl(href));
+  assert.equal(streams.streams.length,0);
 });
