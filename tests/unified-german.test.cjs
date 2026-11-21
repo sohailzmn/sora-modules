@@ -118,6 +118,12 @@ test("normal domain failure retries the published alternative without changing T
   assert.equal((await ctx.__shiroxSourceRequest("https://serienstream.to/serie/dexter",{},"GET",null)).status,200);
   assert.deepEqual(visited,["https://serienstream.to/serie/dexter","https://serienstream.cx/serie/dexter"]);
 });
+
+test("redirected hoster uses the final player origin for media verification", async () => {
+  const ctx=seriesInstance();
+  const result=ctx.stoProvider({originalUrl:"https://new-player.example/e/123",requests:["https://voe.sx/e/123"]},"VOE");
+  assert.equal(result,"https://new-player.example/e/123");
+});
 test("all bundled JavaScript parses in the module runtime", () => {
   assert.ok(instance().__UNIFIED_SOURCES.length === 2);
 });

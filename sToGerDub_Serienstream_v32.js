@@ -680,6 +680,8 @@ function stoHosters(html){
  return out;
 }
 function stoProvider(capture,provider){
+ var finalPage=capture&&capture.originalUrl;
+ if(__awPublic(finalPage)&&!/^https?:\/\/(?:www\.)?(?:serienstream\.(?:to|cx)|s\.to)\//i.test(finalPage)&&!__awMediaKind(finalPage))return finalPage;
  var items=Array.isArray(capture&&capture.requests)?capture.requests.slice():[];
  if(capture&&capture.cutoffUrl)items.unshift(capture.cutoffUrl);
  var hint=provider.toLowerCase();if(hint.indexOf("voe")>=0)hint="voe";
@@ -702,7 +704,7 @@ async function stoCapture(h,episode){
   try{
    var second=await networkFetch(external,Object.assign({},options,{headers:{Referer:BASE_URL+"/"}}));
    if(second&&stoPlayerBlocked(second.html))blocked=true;
-   else if(second&&second.success!==false)captures.unshift({data:second,base:external});
+   else if(second&&second.success!==false)captures.unshift({data:second,base:__awPublic(second.originalUrl)?second.originalUrl:external});
   }catch(e){__awLog("hoster "+h.title+" second player failed")}
  }
  for(var i=0;i<captures.length;i++){
