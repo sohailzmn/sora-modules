@@ -1,5 +1,5 @@
 const BASE_URL = "https://aniworld.to";
-// v3.5.0: standalone, no runtime script downloader.
+// v3.5.1: standalone, no runtime script downloader.
 
 async function __requestText(url, options) {
   options = options || {};
@@ -18,7 +18,7 @@ async function __requestText(url, options) {
     try {
       response = await fetch(url, options);
     } catch (e2) {
-      console.log("[AniWorld v3.5.0] request failed:", url, e2);
+      console.log("[AniWorld v3.5.1] request failed:", url, e2);
       return "";
     }
   }
@@ -96,10 +96,10 @@ async function searchResults(keyword) {
       });
     }
 
-    console.log("[AniWorld v3.5.0] search results:", results.length);
+    console.log("[AniWorld v3.5.1] search results:", results.length);
     return JSON.stringify(results);
   } catch (error) {
-    console.log("[AniWorld v3.5.0] search error:", error);
+    console.log("[AniWorld v3.5.1] search error:", error);
     return JSON.stringify([]);
   }
 }
@@ -223,11 +223,11 @@ async function extractEpisodes(url) {
   }
 }
 
-// v3.5.0: The episode exists but the old fetch-only resolver often sees no media
+// v3.5.1: The episode exists but the old fetch-only resolver often sees no media
 // in hoster pages. Shirox networkFetch observes real browser/player requests.
 function __awLog(message) {
-  if (typeof console !== "undefined" && typeof console.warn === "function") console.warn("[AniWorld v3.5.0] " + message);
-  else if (typeof console !== "undefined" && typeof console.log === "function") console.log("[AniWorld v3.5.0] " + message);
+  if (typeof console !== "undefined" && typeof console.warn === "function") console.warn("[AniWorld v3.5.1] " + message);
+  else if (typeof console !== "undefined" && typeof console.log === "function") console.log("[AniWorld v3.5.1] " + message);
 }
 function __awAttr(tag, key) {
   var re = new RegExp("(?:^|\\s)" + key.replace(/[-]/g, "\\-") + "\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s>]+))", "i");
@@ -282,6 +282,18 @@ function __awHosters(html) {
     var hoster = (li.match(/<h4\b[^>]*>([\s\S]*?)<\/h4>/i) || [])[1] || "Video";
     hoster = hoster.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim();
     out.push({ url: url, title: hoster });
+  }
+  // Keep compatibility with v2 episode layouts using provider buttons.
+  // Respect the published German audio language and same-origin redirect.
+  var buttons = String(html || "").match(/<button\b[^>]*data-play-url\s*=\s*["'][^"']+["'][^>]*>/gi) || [];
+  for (var b = 0; b < buttons.length; b++) {
+    var tag = buttons[b], language = __awAttr(tag, "data-language-label") ||
+      (__awAttr(tag, "data-language-id") === "1" ? "Deutsch" : "");
+    if (!/(deutsch|german|ger dub)/i.test(language) || /(untertitel|sub)/i.test(language)) continue;
+    var buttonURL = __awAbsolute(__awAttr(tag, "data-play-url"), BASE_URL + "/");
+    if (!/^https:\/\/aniworld\.to\/(?:redirect\/|r\?)/i.test(buttonURL) || seen[buttonURL]) continue;
+    seen[buttonURL] = true;
+    out.push({url:buttonURL,title:__awAttr(tag,"data-provider-name") || "Video"});
   }
   var order = { voe: 0, vidmoly: 1, filemoon: 2, loadx: 3, luluvdo: 4 };
   out.sort(function(a,b) {

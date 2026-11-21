@@ -1,11 +1,11 @@
-/* Shirox Unified German v1.0.0
+/* Shirox Unified German v1.0.1
  * Two isolated provider runtimes. No shared globals between their parsers.
  * Bundled source code (not remote eval). Fetches use Shirox's existing
  * fetchv2/networkFetch bridges. No AniBridge server or API key required.
  */
 var __UNIFIED_ANIWORLD=(function(){
 const BASE_URL = "https://aniworld.to";
-// v3.5.0: standalone, no runtime script downloader.
+// v3.5.1: standalone, no runtime script downloader.
 
 async function __requestText(url, options) {
   options = options || {};
@@ -24,7 +24,7 @@ async function __requestText(url, options) {
     try {
       response = await fetch(url, options);
     } catch (e2) {
-      console.log("[AniWorld v3.5.0] request failed:", url, e2);
+      console.log("[AniWorld v3.5.1] request failed:", url, e2);
       return "";
     }
   }
@@ -102,10 +102,10 @@ async function searchResults(keyword) {
       });
     }
 
-    console.log("[AniWorld v3.5.0] search results:", results.length);
+    console.log("[AniWorld v3.5.1] search results:", results.length);
     return JSON.stringify(results);
   } catch (error) {
-    console.log("[AniWorld v3.5.0] search error:", error);
+    console.log("[AniWorld v3.5.1] search error:", error);
     return JSON.stringify([]);
   }
 }
@@ -229,11 +229,11 @@ async function extractEpisodes(url) {
   }
 }
 
-// v3.5.0: The episode exists but the old fetch-only resolver often sees no media
+// v3.5.1: The episode exists but the old fetch-only resolver often sees no media
 // in hoster pages. Shirox networkFetch observes real browser/player requests.
 function __awLog(message) {
-  if (typeof console !== "undefined" && typeof console.warn === "function") console.warn("[AniWorld v3.5.0] " + message);
-  else if (typeof console !== "undefined" && typeof console.log === "function") console.log("[AniWorld v3.5.0] " + message);
+  if (typeof console !== "undefined" && typeof console.warn === "function") console.warn("[AniWorld v3.5.1] " + message);
+  else if (typeof console !== "undefined" && typeof console.log === "function") console.log("[AniWorld v3.5.1] " + message);
 }
 function __awAttr(tag, key) {
   var re = new RegExp("(?:^|\\s)" + key.replace(/[-]/g, "\\-") + "\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s>]+))", "i");
@@ -288,6 +288,18 @@ function __awHosters(html) {
     var hoster = (li.match(/<h4\b[^>]*>([\s\S]*?)<\/h4>/i) || [])[1] || "Video";
     hoster = hoster.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim();
     out.push({ url: url, title: hoster });
+  }
+  // Keep compatibility with v2 episode layouts using provider buttons.
+  // Respect the published German audio language and same-origin redirect.
+  var buttons = String(html || "").match(/<button\b[^>]*data-play-url\s*=\s*["'][^"']+["'][^>]*>/gi) || [];
+  for (var b = 0; b < buttons.length; b++) {
+    var tag = buttons[b], language = __awAttr(tag, "data-language-label") ||
+      (__awAttr(tag, "data-language-id") === "1" ? "Deutsch" : "");
+    if (!/(deutsch|german|ger dub)/i.test(language) || /(untertitel|sub)/i.test(language)) continue;
+    var buttonURL = __awAbsolute(__awAttr(tag, "data-play-url"), BASE_URL + "/");
+    if (!/^https:\/\/aniworld\.to\/(?:redirect\/|r\?)/i.test(buttonURL) || seen[buttonURL]) continue;
+    seen[buttonURL] = true;
+    out.push({url:buttonURL,title:__awAttr(tag,"data-provider-name") || "Video"});
   }
   var order = { voe: 0, vidmoly: 1, filemoon: 2, loadx: 3, luluvdo: 4 };
   out.sort(function(a,b) {
@@ -480,7 +492,7 @@ return {searchResults:searchResults,extractDetails:extractDetails,extractEpisode
 })();
 var __UNIFIED_SERIENSTREAM=(function(){
 /*
- * s.to (GER DUB) 1.10.0
+ * s.to (GER DUB) 1.10.1
  * Self-contained Sora/Shirox module: no remote source evaluation, credentials or placeholder streams.
  */
 var BASE_URL = "https://serienstream.to";
@@ -500,7 +512,7 @@ async function __requestText(url, options) {
     try {
       response = await fetch(url, options);
     } catch (e2) {
-      console.log("[SerienStream v1.10.0] request failed:", url, e2);
+      console.log("[SerienStream v1.10.1] request failed:", url, e2);
       return "";
     }
   }
@@ -533,8 +545,8 @@ function __absolute(url) {
 }
 
 function __awLog(message) {
-  if (typeof console !== "undefined" && typeof console.warn === "function") console.warn("[SerienStream v1.10.0] " + message);
-  else if (typeof console !== "undefined" && typeof console.log === "function") console.log("[SerienStream v1.10.0] " + message);
+  if (typeof console !== "undefined" && typeof console.warn === "function") console.warn("[SerienStream v1.10.1] " + message);
+  else if (typeof console !== "undefined" && typeof console.log === "function") console.log("[SerienStream v1.10.1] " + message);
 }
 function __awAttr(tag, key) {
   var re = new RegExp("(?:^|\\s)" + key.replace(/[-]/g, "\\-") + "\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s>]+))", "i");
@@ -975,7 +987,11 @@ function stoHosters(html){
   seen[url]=true;out.push({url:url,title:stoClean(provider)||"Hoster"});
  };
  var tags=html.match(/<[^>]*data-play-url\s*=\s*["'][^"']+["'][^>]*>/gi)||[];
- for(var i=0;i<tags.length;i++)add(__awAttr(tags[i],"data-play-url"),__awAttr(tags[i],"data-provider-name")||__awAttr(tags[i],"title"),__awAttr(tags[i],"data-language-label")||__awAttr(tags[i],"data-audio-language"));
+ for(var i=0;i<tags.length;i++){
+  var language=__awAttr(tags[i],"data-language-label")||__awAttr(tags[i],"data-audio-language")||
+    (__awAttr(tags[i],"data-language-id")==="1"?"Deutsch":"");
+  add(__awAttr(tags[i],"data-play-url"),__awAttr(tags[i],"data-provider-name")||__awAttr(tags[i],"title"),language);
+ }
  var langs={},imgs=html.match(/<img\b[^>]*>/gi)||[];
  for(var j=0;j<imgs.length;j++){var k=__awAttr(imgs[j],"data-lang-key");if(k)langs[k]=__awAttr(imgs[j],"title")||__awAttr(imgs[j],"alt")}
  var rows=html.match(/<li\b[^>]*data-lang-key\s*=\s*["'][^"']+["'][\s\S]*?<\/li>/gi)||[];

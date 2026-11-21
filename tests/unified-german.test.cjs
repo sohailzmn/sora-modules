@@ -67,3 +67,23 @@ test("stream URLs are deduplicated and invalid URLs are discarded", async () => 
   const result = JSON.parse(await ctx.extractStreamUrl("https://aniworld.to/anime/stream/one-piece/staffel-1/episode-1"));
   assert.deepEqual(result.streams.map(s => s.title), ["VOE", "Filemoon"]);
 });
+
+
+test("AniWorld v2 provider buttons identify German dub", () => {
+  const context = vm.createContext({console:{warn(){},log(){}}});
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "AniWorldGerDub_v341.js"), "utf8"), context);
+  const html = '<button data-play-url="/r?t=de1" data-provider-name="VOE" data-language-id="1"></button>' +
+               '<button data-play-url="/r?t=en1" data-provider-name="VOE" data-language-id="2"></button>';
+  const hosts = context.__awHosters(html);
+  assert.equal(hosts.length, 1);
+  assert.match(hosts[0].url, /^https:\/\/aniworld\.to\/r\?/);
+});
+test("SerienStream v2 provider buttons recognise German language id", () => {
+  const context = vm.createContext({console:{warn(){},log(){}}});
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "sToGerDub_Serienstream_v32.js"), "utf8"), context);
+  const html = '<button data-play-url="/r?t=de1" data-provider-name="VOE" data-language-id="1"></button>' +
+               '<button data-play-url="/r?t=en1" data-provider-name="VOE" data-language-id="2"></button>';
+  const hosts = context.stoHosters(html);
+  assert.equal(hosts.length, 1);
+  assert.match(hosts[0].url, /^https:\/\/serienstream\.to\/r\?/);
+});
