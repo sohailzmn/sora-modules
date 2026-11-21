@@ -1,3 +1,11 @@
+async function __shiroxSourceRequest(url,headers,method,body){
+ try{return await fetchv2(url,headers,method,body)}catch(error){
+  var alternate=String(url).replace(/^(https:\/\/)(aniworld)\.to(?=\/|$)/i,"$1$2.cc")
+    .replace(/^(https:\/\/)(serienstream)\.to(?=\/|$)/i,"$1$2.cx");
+  if(alternate===url)throw error;
+  return await fetchv2(alternate,headers,method,body);
+ }
+}
 // __SHIROX_LANGUAGE_CONTRACT_V2: per-episode language-aware resolver.
 function __shiroxAttr(tag,key){
  var m=String(tag||"").match(new RegExp("(?:^|\\s)"+key+"\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)')","i"));
@@ -44,17 +52,23 @@ function __shiroxStreamPriority(stream){
 async function __shiroxResolveLanguage(hosters,capture,options){
  var specified=options&&typeof options.languagePriority==="number",first=specified?options.languagePriority:0,last=specified?first:2;
  for(var priority=first;priority<=last;priority++){
-  var candidates=hosters.filter(function(h){var l=h.language||{};return l.languagePriority===priority||(priority>0&&l.languagePriority===3)}).slice(0,3);
+  var candidates=hosters.filter(function(h){var l=h.language||{};return l.languagePriority===priority||(priority>0&&l.languagePriority===3)}).slice(0,12);
   if(!candidates.length)continue;
   var streams=await new Promise(function(resolve){
-   var done=false,pending=candidates.length,out=[],seen={},grace,timer=setTimeout(finish,8000);
+   var done=false,next=0,active=0,out=[],seen={},grace,timer=setTimeout(finish,24000);
    function finish(){if(done)return;done=true;clearTimeout(timer);if(grace)clearTimeout(grace);resolve(out)}
-   candidates.forEach(function(h){Promise.resolve().then(function(){return capture(h)}).then(function(value){
-    if(done)return;
-    var values=Array.isArray(value)?value:[value];
-    values.forEach(function(s){if(s&&s.streamUrl&&(priority===0?s.audioLanguage==="de":s.audioLanguage!=="de"&&(s.isHardsub&&s.subtitleLanguage===(priority===1?"de":"en")||(s.allSubtitles||[]).some(function(t){return priority===1?/^(de|deu|ger)(-|$)/i.test(t.lang):/^(en|eng)(-|$)/i.test(t.lang)})))&&!seen[s.streamUrl]){seen[s.streamUrl]=true;out.push(s)}});
-    if(out.length>=2)finish();else if(out.length&&!grace)grace=setTimeout(finish,500);
-   },function(){}).then(function(){if(--pending===0)finish()})});
+   function pump(){
+    while(!done&&active<3&&next<candidates.length){
+     var hoster=candidates[next++];active++;
+     Promise.resolve(hoster).then(capture).then(function(value){
+      if(done)return;
+      var values=Array.isArray(value)?value:[value];
+      values.forEach(function(s){if(s&&s.streamUrl&&(priority===0?s.audioLanguage==="de":s.audioLanguage!=="de"&&(s.isHardsub&&s.subtitleLanguage===(priority===1?"de":"en")||(s.allSubtitles||[]).some(function(t){return priority===1?/^(de|deu|ger)(-|$)/i.test(t.lang):/^(en|eng)(-|$)/i.test(t.lang)})))&&!seen[s.streamUrl]){seen[s.streamUrl]=true;out.push(s)}});
+      if(out.length>=2)finish();else if(out.length&&!grace)grace=setTimeout(finish,500);
+     },function(){}).then(function(){active--;if(!done){if(next===candidates.length&&active===0)finish();else pump()}});
+    }
+   }
+   pump();
   });
   if(streams.length)return streams;
  }
@@ -82,7 +96,7 @@ async function __requestText(url, options) {
 
   var response = null;
   try {
-    response = await fetchv2(url, headers, options.method || "GET", options.body || null);
+    response = await __shiroxSourceRequest(url, headers, options.method || "GET", options.body || null);
   } catch (e) {
     try {
       response = await fetch(url, options);
@@ -193,7 +207,7 @@ function __awSeriesRoot(value) {
   var url=String(value||"").trim().replace(/&amp;/gi,"&");
   if(url.indexOf("//")===0)url="https:"+url;
   if(url.charAt(0)==="/")url=BASE_URL+url;
-  var match=url.match(/^https?:\/\/(?:www\.)?aniworld\.to\/anime\/stream\/([^/?#]+)/i);
+  var match=url.match(/^https?:\/\/(?:www\.)?aniworld\.(?:to|cc)\/anime\/stream\/([^/?#]+)/i);
   if(!match)return "";
   return BASE_URL+"/anime/stream/"+match[1];
 }
@@ -204,7 +218,7 @@ function __awSeasonLinks(html,root) {
   while((m=re.exec(str))!==null) {
     var raw=m[1]||m[2]||m[3]||"";
     var link=__awAbsolute(raw,BASE_URL+"/");
-    var info=link.match(/^(https?:\/\/(?:www\.)?aniworld\.to\/anime\/stream\/[^/?#]+)\/staffel-(\d+)(?:\/|[?#]|$)/i);
+    var info=link.match(/^(https?:\/\/(?:www\.)?aniworld\.(?:to|cc)\/anime\/stream\/[^/?#]+)\/staffel-(\d+)(?:\/|[?#]|$)/i);
     if(!info||__awSeriesRoot(info[1])!==root)continue;
     var number=parseInt(info[2],10);
     if(!Number.isFinite(number)||number<1)continue;
@@ -219,7 +233,7 @@ function __awEpisodeLinks(html,root,expectedSeason){
   while((m=re.exec(String(html||"")))!==null) {
     var raw=m[1]||m[2]||m[3]||"";
     var url=__awAbsolute(raw,BASE_URL+"/");
-    var parts=url.match(/^(https?:\/\/(?:www\.)?aniworld\.to\/anime\/stream\/[^/?#]+)\/staffel-(\d+)\/episode-(\d+)(?=[/?#]|$)/i);
+    var parts=url.match(/^(https?:\/\/(?:www\.)?aniworld\.(?:to|cc)\/anime\/stream\/[^/?#]+)\/staffel-(\d+)\/episode-(\d+)(?=[/?#]|$)/i);
     if(!parts||__awSeriesRoot(parts[1])!==root)continue;
     var season=parseInt(parts[2],10),episode=parseInt(parts[3],10);
     if(season!==expectedSeason||episode<1||!Number.isFinite(episode))continue;
@@ -347,7 +361,7 @@ function __awHosters(html) {
     var languageMetadata=__shiroxLanguage(language); if(!languageMetadata)continue;
     var link = (li.match(/<a\b[^>]*href\s*=\s*["']([^"']+)["']/i) || [])[1];
     var url = __awAbsolute(link, BASE_URL + "/");
-    if (!url || !/^https:\/\/aniworld\.to\/redirect\//i.test(url) || seen[url]) continue;
+    if (!url || !/^https:\/\/aniworld\.(?:to|cc)\/redirect\//i.test(url) || seen[url]) continue;
     seen[url] = true;
     var hoster = (li.match(/<h4\b[^>]*>([\s\S]*?)<\/h4>/i) || [])[1] || "Video";
     hoster = hoster.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim();
@@ -361,7 +375,7 @@ function __awHosters(html) {
       (__awAttr(tag, "data-language-id") === "1" ? "Deutsch" : "");
     var languageMetadata=__shiroxLanguage(language); if(!languageMetadata)continue;
     var buttonURL = __awAbsolute(__awAttr(tag, "data-play-url"), BASE_URL + "/");
-    if (!/^https:\/\/aniworld\.to\/(?:redirect\/|r\?)/i.test(buttonURL) || seen[buttonURL]) continue;
+    if (!/^https:\/\/aniworld\.(?:to|cc)\/(?:redirect\/|r\?)/i.test(buttonURL) || seen[buttonURL]) continue;
     seen[buttonURL] = true;
     out.push({url:buttonURL,title:__awAttr(tag,"data-provider-name") || "Video",language:languageMetadata});
   }
@@ -489,7 +503,7 @@ async function __awQualityOptions(verified,page,providerName){
 async function __awCapture(provider) {
   if(typeof networkFetch!=="function")return null;
   var result=await networkFetch(provider.url,{
-    timeoutSeconds:10,returnHTML:true,returnCookies:false,
+    timeoutSeconds:10,cutoff:".m3u8",returnHTML:true,returnCookies:false,
     headers:{Referer:BASE_URL+"/"},waitForSelectors:["video","source"],
     clickSelectors:[".vjs-big-play-button",".jw-icon-display","button[aria-label='Play']",".art-icon-play[aria-label='Play']"],
     maxWaitTime:3
@@ -498,7 +512,7 @@ async function __awCapture(provider) {
   var requests=Array.isArray(result.requests)?result.requests:[],page=provider.url;
   for(var j=0;j<requests.length;j++){
     var link=typeof requests[j]==="string"?requests[j]:requests[j]&&(requests[j].url||requests[j].requestUrl);
-    if(link&&__awPublic(link)&&!/^https:\/\/aniworld\.to\//i.test(link)&&
+    if(link&&__awPublic(link)&&!/^https:\/\/aniworld\.(?:to|cc)\//i.test(link)&&
       /(voe|vidmoly|filemoon|loadx|luluvdo)/i.test(__awOrigin(link))&&!__awMediaKind(link)){page=link;break}
   }
   var urls=__awCandidates(result,page);
@@ -562,7 +576,7 @@ async function __requestText(url, options) {
 
   var response = null;
   try {
-    response = await fetchv2(url, headers, options.method || "GET", options.body || null);
+    response = await __shiroxSourceRequest(url, headers, options.method || "GET", options.body || null);
   } catch (e) {
     try {
       response = await fetch(url, options);
@@ -793,7 +807,7 @@ async function stoBrowserPage(url) {
   if(typeof networkFetch!=="function")return "";
   try {
     var page=await networkFetch(url,{
-      timeoutSeconds:8,returnHTML:true,returnCookies:false,
+      timeoutSeconds:8,cutoff:".m3u8",returnHTML:true,returnCookies:false,
       waitForSelectors:["h1","main","a[href*='/serie/']"],maxWaitTime:2
     });
     return page&&page.success!==false?String(page.html||""):"";
@@ -1162,14 +1176,14 @@ function stoProvider(capture,provider){
 }
 async function stoCapture(h,episode){
  if(typeof networkFetch!=="function")return null;
- var options={timeoutSeconds:8,returnHTML:true,returnCookies:false,maxWaitTime:2,
+ var options={timeoutSeconds:8,cutoff:".m3u8",returnHTML:true,returnCookies:false,maxWaitTime:2,
   waitForSelectors:["video","source"],
   clickSelectors:[".vjs-big-play-button",".jw-icon-display","button[aria-label='Play']",".art-icon-play[aria-label='Play']"]};
  var first=await networkFetch(h.url,Object.assign({},options,{headers:{Referer:episode,"X-Shirox-SerienStream-Episode":episode}}));
  if(first&&stoPlayerBlocked(first.html))return {blockedReason:"website_verification_required"};
  if(!first||first.success===false)return null;
  var blocked=false,external=stoProvider(first,h.title),captures=[{data:first,base:external||h.url}];
- if(external){
+ if(external && !__awCandidates(first,external||h.url).length){
   try{
    var second=await networkFetch(external,Object.assign({},options,{headers:{Referer:BASE_URL+"/"}}));
    if(second&&stoPlayerBlocked(second.html))blocked=true;
@@ -1251,6 +1265,35 @@ var __UNIFIED_SOURCES=[
   {id:"aniworld",base:"https://aniworld.to",api:__UNIFIED_ANIWORLD},
   {id:"serienstream",base:"https://serienstream.to",api:__UNIFIED_SERIENSTREAM}
 ];
+
+function __unifiedCatalogRows(html,kind){
+  var source=kind==="anime"?__UNIFIED_SOURCES[0]:__UNIFIED_SOURCES[1],out=[],seen={};
+  var links=String(html||"").match(/<a\b[^>]*>[\s\S]*?<\/a>/gi)||[];
+  links.forEach(function(link){
+    var tag=(link.match(/^<a\b[^>]*>/i)||[""])[0],href=__unifiedAbsolute(source,__shiroxAttr(tag,"href"));
+    var match=href.match(kind==="anime"?/^https:\/\/(?:www\.)?aniworld\.(?:to|cc)(\/anime\/stream\/[^/?#]+)/i:/^https:\/\/(?:www\.)?(?:serienstream\.(?:to|cx)|s\.to)(\/serie\/(?:stream\/)?[^/?#]+)/i);
+    if(!match)return;
+    // Episode promotions are not a series catalogue entry.
+    if(/\/episode-\d+/i.test(href))return;
+    href=source.base+match[1];if(seen[href])return;
+    var heading=(link.match(/<(?:h3|h2|strong)\b[^>]*>([\s\S]*?)<\/(?:h3|h2|strong)>/i)||[])[1];
+    var image=(link.match(/<img\b[^>]*>/i)||[""])[0];
+    var title=heading||__shiroxAttr(tag,"title")||__shiroxAttr(image,"alt")||link.replace(/^<a\b[^>]*>|<\/a>$/gi,"");
+    title=String(title).replace(/<[^>]*>/g," ").replace(/&amp;/gi,"&").replace(/&quot;/gi,'"').replace(/&#39;/gi,"'").replace(/\s+/g," ").trim();
+    var picture=__shiroxAttr(image,"data-src")||__shiroxAttr(image,"src");
+    if(!title||title.length>180)return;
+    seen[href]=true;out.push({title:title,href:href,image:/^data:/i.test(picture)?"":__unifiedAbsolute(source,picture)});
+  });
+  return out.slice(0,100);
+}
+async function extractCatalog(options){
+  var kind=options&&options.kind;if(kind!=="anime"&&kind!=="series")return "[]";
+  var source=kind==="anime"?__UNIFIED_SOURCES[0]:__UNIFIED_SOURCES[1];
+  var response=await __shiroxSourceRequest(source.base+"/",{Accept:"text/html"},"GET",null);
+  if(!response||(typeof response.status==="number"&&response.status!==200))return "[]";
+  var html=typeof response.text==="function"?await response.text():String(response);
+  return JSON.stringify(__unifiedCatalogRows(html,kind));
+}
 /* All source requests are bounded. A blocked / unresponsive S.to response must
  * not prevent AniWorld results from rendering in the app. Timers are provided
  * by Shirox's native JSContext bridge, not by a remote service. */
@@ -1282,8 +1325,8 @@ function __unifiedWithin(promise, timeoutMs, fallback, operation) {
 }
 function __unifiedProvider(url){
   var value=String(url||"").toLowerCase();
-  if(/^https?:\/\/(?:www\.)?aniworld\.to(?:\/|$)/.test(value))return __UNIFIED_SOURCES[0];
-  if(/^https?:\/\/(?:www\.)?(?:serienstream\.to|s\.to)(?:\/|$)/.test(value))return __UNIFIED_SOURCES[1];
+  if(/^https?:\/\/(?:www\.)?aniworld\.(?:to|cc)(?:\/|$)/.test(value))return __UNIFIED_SOURCES[0];
+  if(/^https?:\/\/(?:www\.)?(?:serienstream\.(?:to|cx)|s\.to)(?:\/|$)/.test(value))return __UNIFIED_SOURCES[1];
   return null;
 }
 function __unifiedJSON(value,fallback){

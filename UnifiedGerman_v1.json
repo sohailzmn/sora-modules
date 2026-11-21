@@ -1,9 +1,9 @@
 {
-  "sourceName": "Shirox Unified GER (AniWorld + S.to)",
+  "sourceName": "Shirox Unified GER (AniWorld + SerienStream)",
   "author": {
     "name": "Sohailzm"
   },
-  "version": "2.0.0",
+  "version": "2.0.1",
   "language": "Deutsch bevorzugt, DE/EN Untertitel",
   "type": "anime",
   "streamType": "HLS/MP4",

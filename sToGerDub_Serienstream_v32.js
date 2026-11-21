@@ -1,3 +1,11 @@
+async function __shiroxSourceRequest(url,headers,method,body){
+ try{return await fetchv2(url,headers,method,body)}catch(error){
+  var alternate=String(url).replace(/^(https:\/\/)(aniworld)\.to(?=\/|$)/i,"$1$2.cc")
+    .replace(/^(https:\/\/)(serienstream)\.to(?=\/|$)/i,"$1$2.cx");
+  if(alternate===url)throw error;
+  return await fetchv2(alternate,headers,method,body);
+ }
+}
 // __SHIROX_LANGUAGE_CONTRACT_V2: per-episode language-aware resolver.
 function __shiroxAttr(tag,key){
  var m=String(tag||"").match(new RegExp("(?:^|\\s)"+key+"\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)')","i"));
@@ -44,17 +52,23 @@ function __shiroxStreamPriority(stream){
 async function __shiroxResolveLanguage(hosters,capture,options){
  var specified=options&&typeof options.languagePriority==="number",first=specified?options.languagePriority:0,last=specified?first:2;
  for(var priority=first;priority<=last;priority++){
-  var candidates=hosters.filter(function(h){var l=h.language||{};return l.languagePriority===priority||(priority>0&&l.languagePriority===3)}).slice(0,3);
+  var candidates=hosters.filter(function(h){var l=h.language||{};return l.languagePriority===priority||(priority>0&&l.languagePriority===3)}).slice(0,12);
   if(!candidates.length)continue;
   var streams=await new Promise(function(resolve){
-   var done=false,pending=candidates.length,out=[],seen={},grace,timer=setTimeout(finish,8000);
+   var done=false,next=0,active=0,out=[],seen={},grace,timer=setTimeout(finish,24000);
    function finish(){if(done)return;done=true;clearTimeout(timer);if(grace)clearTimeout(grace);resolve(out)}
-   candidates.forEach(function(h){Promise.resolve().then(function(){return capture(h)}).then(function(value){
-    if(done)return;
-    var values=Array.isArray(value)?value:[value];
-    values.forEach(function(s){if(s&&s.streamUrl&&(priority===0?s.audioLanguage==="de":s.audioLanguage!=="de"&&(s.isHardsub&&s.subtitleLanguage===(priority===1?"de":"en")||(s.allSubtitles||[]).some(function(t){return priority===1?/^(de|deu|ger)(-|$)/i.test(t.lang):/^(en|eng)(-|$)/i.test(t.lang)})))&&!seen[s.streamUrl]){seen[s.streamUrl]=true;out.push(s)}});
-    if(out.length>=2)finish();else if(out.length&&!grace)grace=setTimeout(finish,500);
-   },function(){}).then(function(){if(--pending===0)finish()})});
+   function pump(){
+    while(!done&&active<3&&next<candidates.length){
+     var hoster=candidates[next++];active++;
+     Promise.resolve(hoster).then(capture).then(function(value){
+      if(done)return;
+      var values=Array.isArray(value)?value:[value];
+      values.forEach(function(s){if(s&&s.streamUrl&&(priority===0?s.audioLanguage==="de":s.audioLanguage!=="de"&&(s.isHardsub&&s.subtitleLanguage===(priority===1?"de":"en")||(s.allSubtitles||[]).some(function(t){return priority===1?/^(de|deu|ger)(-|$)/i.test(t.lang):/^(en|eng)(-|$)/i.test(t.lang)})))&&!seen[s.streamUrl]){seen[s.streamUrl]=true;out.push(s)}});
+      if(out.length>=2)finish();else if(out.length&&!grace)grace=setTimeout(finish,500);
+     },function(){}).then(function(){active--;if(!done){if(next===candidates.length&&active===0)finish();else pump()}});
+    }
+   }
+   pump();
   });
   if(streams.length)return streams;
  }
@@ -77,7 +91,7 @@ async function __requestText(url, options) {
 
   var response = null;
   try {
-    response = await fetchv2(url, headers, options.method || "GET", options.body || null);
+    response = await __shiroxSourceRequest(url, headers, options.method || "GET", options.body || null);
   } catch (e) {
     try {
       response = await fetch(url, options);
@@ -308,7 +322,7 @@ async function stoBrowserPage(url) {
   if(typeof networkFetch!=="function")return "";
   try {
     var page=await networkFetch(url,{
-      timeoutSeconds:8,returnHTML:true,returnCookies:false,
+      timeoutSeconds:8,cutoff:".m3u8",returnHTML:true,returnCookies:false,
       waitForSelectors:["h1","main","a[href*='/serie/']"],maxWaitTime:2
     });
     return page&&page.success!==false?String(page.html||""):"";
@@ -677,14 +691,14 @@ function stoProvider(capture,provider){
 }
 async function stoCapture(h,episode){
  if(typeof networkFetch!=="function")return null;
- var options={timeoutSeconds:8,returnHTML:true,returnCookies:false,maxWaitTime:2,
+ var options={timeoutSeconds:8,cutoff:".m3u8",returnHTML:true,returnCookies:false,maxWaitTime:2,
   waitForSelectors:["video","source"],
   clickSelectors:[".vjs-big-play-button",".jw-icon-display","button[aria-label='Play']",".art-icon-play[aria-label='Play']"]};
  var first=await networkFetch(h.url,Object.assign({},options,{headers:{Referer:episode,"X-Shirox-SerienStream-Episode":episode}}));
  if(first&&stoPlayerBlocked(first.html))return {blockedReason:"website_verification_required"};
  if(!first||first.success===false)return null;
  var blocked=false,external=stoProvider(first,h.title),captures=[{data:first,base:external||h.url}];
- if(external){
+ if(external && !__awCandidates(first,external||h.url).length){
   try{
    var second=await networkFetch(external,Object.assign({},options,{headers:{Referer:BASE_URL+"/"}}));
    if(second&&stoPlayerBlocked(second.html))blocked=true;

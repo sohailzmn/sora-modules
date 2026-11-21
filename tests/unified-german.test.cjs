@@ -76,6 +76,48 @@ function instance() {
   vm.runInContext(source, context, { timeout: 3000 });
   return context;
 }
+
+test("a ten-second browser result survives the surrounding resolver deadline", async () => {
+  const ctx = instance();
+  // Scale all module timers together. Previously the 8-second outer timer
+  // discarded the 10-second networkFetch result before it could be inspected.
+  ctx.setTimeout = (callback, ms) => setTimeout(callback, ms / 100);
+  const streams = await ctx.__shiroxResolveLanguage(
+    [{language:{languagePriority:0}}],
+    () => new Promise(resolve => ctx.setTimeout(() => resolve({streamUrl:"https://media.example/episode.m3u8",audioLanguage:"de"}),10000)),
+    {languagePriority:0});
+  assert.equal(streams.length,1);
+});
+
+test("failed first three hosters do not prevent a fourth valid hoster", async () => {
+  const ctx = instance();
+  const visited = [];
+  const streams = await ctx.__shiroxResolveLanguage(
+    [0,1,2,3].map(id => ({id,language:{languagePriority:0}})),
+    async hoster => { visited.push(hoster.id); return hoster.id===3 ? {streamUrl:"https://media.example/fourth.m3u8",audioLanguage:"de"} : null; },
+    {languagePriority:0});
+  assert.equal(streams.length,1);
+  assert.ok(visited.includes(3));
+});
+
+test("source shelves keep anime and series separate and remove episode promotions", () => {
+  const ctx=instance();
+  const html='<a href="/anime/stream/spy-x-family"><img data-src="/poster.jpg"><h3>Spy x Family</h3></a>' +
+    '<a href="/anime/stream/spy-x-family/staffel-1/episode-1"><h3>Episode promotion</h3></a>'+
+    '<a href="https://serienstream.cx/serie/dexter"><h3>Dexter</h3></a>';
+  assert.equal(ctx.__unifiedCatalogRows(html,"anime").length,1);
+  assert.equal(ctx.__unifiedCatalogRows(html,"anime")[0].title,"Spy x Family");
+  assert.equal(ctx.__unifiedCatalogRows(html,"series")[0].href,"https://serienstream.to/serie/dexter");
+  assert.equal(ctx.__unifiedProvider("https://serienstream.cx/serie/dexter").id,"serienstream");
+  assert.equal(ctx.__unifiedProvider("https://aniworld.cc/anime/stream/spy-x-family").id,"aniworld");
+});
+
+test("normal domain failure retries the published alternative without changing TLS", async () => {
+  const ctx=instance(),visited=[];
+  ctx.fetchv2=async url => {visited.push(url);if(url.includes("serienstream.to"))throw Error("DNS");return {status:200};};
+  assert.equal((await ctx.__shiroxSourceRequest("https://serienstream.to/serie/dexter",{},"GET",null)).status,200);
+  assert.deepEqual(visited,["https://serienstream.to/serie/dexter","https://serienstream.cx/serie/dexter"]);
+});
 test("all bundled JavaScript parses in the module runtime", () => {
   assert.ok(instance().__UNIFIED_SOURCES.length === 2);
 });
