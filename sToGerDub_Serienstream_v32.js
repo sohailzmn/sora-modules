@@ -1,5 +1,5 @@
 /*
- * s.to (GER DUB) 1.9.4
+ * s.to (GER DUB) 1.10.0
  * Self-contained Sora/Shirox module: no remote source evaluation, credentials or placeholder streams.
  */
 var BASE_URL = "https://serienstream.to";
@@ -19,7 +19,7 @@ async function __requestText(url, options) {
     try {
       response = await fetch(url, options);
     } catch (e2) {
-      console.log("[SerienStream v1.9.4] request failed:", url, e2);
+      console.log("[SerienStream v1.10.0] request failed:", url, e2);
       return "";
     }
   }
@@ -52,8 +52,8 @@ function __absolute(url) {
 }
 
 function __awLog(message) {
-  if (typeof console !== "undefined" && typeof console.warn === "function") console.warn("[SerienStream v1.9.4] " + message);
-  else if (typeof console !== "undefined" && typeof console.log === "function") console.log("[SerienStream v1.9.4] " + message);
+  if (typeof console !== "undefined" && typeof console.warn === "function") console.warn("[SerienStream v1.10.0] " + message);
+  else if (typeof console !== "undefined" && typeof console.log === "function") console.log("[SerienStream v1.10.0] " + message);
 }
 function __awAttr(tag, key) {
   var re = new RegExp("(?:^|\\s)" + key.replace(/[-]/g, "\\-") + "\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s>]+))", "i");
@@ -559,14 +559,19 @@ async function extractStreamUrl(url){
     }
     var hosters=stoHosters(html);
     __awLog("German hosters: "+hosters.length);
-    // Avoid cascading ~14-second WebKit timeouts across 5 providers.
+    // Bounded mirrors: at most 3 hosters, stop after 2 usable streams.
     // Prefer saved provider ordering; an interactive check is not automated.
-    for(var i=0;i<Math.min(hosters.length,2);i++){
+    var streams=[], seen={};
+    for(var i=0;i<Math.min(hosters.length,3);i++){
       try{
         var found=await stoCapture(hosters[i],episode);
-        if(found)return JSON.stringify({streams:[found],subtitles:[]});
+        if(!found||!found.streamUrl||seen[found.streamUrl])continue;
+        seen[found.streamUrl]=true;
+        streams.push(found);
+        if(streams.length>=2)break;
       }catch(e){__awLog("Hoster "+hosters[i].title+" failed: "+String(e).slice(0,100))}
     }
+    if(streams.length)return JSON.stringify({streams:streams,subtitles:[]});
   }catch(e){__awLog("Stream load failed: "+String(e).slice(0,145))}
   return JSON.stringify({streams:[],subtitles:[]});
 }
