@@ -824,7 +824,7 @@ async function stoBrowserPage(url) {
   if(typeof networkFetch!=="function")return "";
   try {
     var page=await networkFetch(__shiroxSourceURL(url),{
-      timeoutSeconds:8,cutoff:".m3u8",returnHTML:true,returnCookies:false,
+      timeoutSeconds:8,returnHTML:true,returnCookies:false,
       waitForSelectors:["h1","main","a[href*='/serie/']"],maxWaitTime:2
     });
     return page&&page.success!==false?String(page.html||""):"";
@@ -1203,7 +1203,7 @@ function stoCaptureSummary(capture){
  if(!capture)return "no browser result";
  var title=stoClean((String(capture.html||"").match(/<title[^>]*>([\s\S]*?)<\/title>/i)||[])[1]||"").slice(0,80);
  var origins=[],seen={};(capture.requests||[]).forEach(function(value){var url=typeof value==="string"?value:value&&value.url;var origin=__awOrigin(url||"");if(origin&&!seen[origin]){seen[origin]=true;origins.push(origin)}});
- return "page="+__awOrigin(capture.originalUrl||capture.url||"")+" title="+title+" requests="+(capture.requests||[]).length+" origins="+origins.slice(0,8).join(",");
+ return "page="+__awOrigin(capture.originalUrl||capture.url||"")+" title="+title+" verificationResponse="+(capture.verificationResponsePresent===true)+" continued="+(capture.verifiedContinuationClicked===true)+" requests="+(capture.requests||[]).length+" origins="+origins.slice(0,8).join(",");
 }
 async function stoCapture(h,episode){
  if(typeof networkFetch!=="function")return null;
@@ -1221,7 +1221,7 @@ async function stoCapture(h,episode){
  }
  var first=await networkFetch(__shiroxSourceURL(firstURL),pageOptions);
  __awLog(h.title+" browser: "+stoCaptureSummary(first));
- if(first&&stoPlayerBlocked(first.html)&&!__awCandidates(first,first.mediaPageURL||first.originalUrl||first.url||firstURL).length)return {blockedReason:"website_verification_required"};
+ if(first&&stoPlayerBlocked(first.html)&&!first.verificationResponsePresent&&!__awCandidates(first,first.mediaPageURL||first.originalUrl||first.url||firstURL).length)return {blockedReason:"website_verification_required"};
  if(!first||first.success===false)return null;
  var blocked=false,external=stoProvider(first,h.title),captures=[{data:first,base:external||h.url}];
  if(external && !__awCandidates(first,external||h.url).length){
