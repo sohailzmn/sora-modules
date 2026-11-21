@@ -1,5 +1,5 @@
 /*
- * s.to (GER DUB) 1.10.1
+ * s.to (GER DUB) 1.11.0
  * Self-contained Sora/Shirox module: no remote source evaluation, credentials or placeholder streams.
  */
 var BASE_URL = "https://serienstream.to";
@@ -19,7 +19,7 @@ async function __requestText(url, options) {
     try {
       response = await fetch(url, options);
     } catch (e2) {
-      console.log("[SerienStream v1.10.1] request failed:", url, e2);
+      console.log("[SerienStream v1.11.0] request failed:", url, e2);
       return "";
     }
   }
@@ -52,8 +52,8 @@ function __absolute(url) {
 }
 
 function __awLog(message) {
-  if (typeof console !== "undefined" && typeof console.warn === "function") console.warn("[SerienStream v1.10.1] " + message);
-  else if (typeof console !== "undefined" && typeof console.log === "function") console.log("[SerienStream v1.10.1] " + message);
+  if (typeof console !== "undefined" && typeof console.warn === "function") console.warn("[SerienStream v1.11.0] " + message);
+  else if (typeof console !== "undefined" && typeof console.log === "function") console.log("[SerienStream v1.11.0] " + message);
 }
 function __awAttr(tag, key) {
   var re = new RegExp("(?:^|\\s)" + key.replace(/[-]/g, "\\-") + "\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s>]+))", "i");
@@ -319,67 +319,99 @@ async function stoValidatedExact(keyword) {
   if(!/(?:\/staffel-\d+|\/episode-\d+|<h1\b|og:title|og:type)/i.test(html))return null;
   return {title:title,href:href,image:stoImage(html,title)};
 }
-async function searchResults(keyword) {
-  // A previous challenge must not poison subsequent searches until reimport.
-  stoVerificationRequired=false;
-  stoSearchPageSucceeded=false;
-  stoSearchProblem="";
-  keyword=String(keyword||"").trim();
-  if(!keyword)return "[]";
-  var all=[],seen={};
-  try {
-    // Named title on the current site: /serie/dexter
-    var exact=await stoValidatedExact(keyword);
-    if(exact){all.push(exact);seen[exact.href]=true}
-    if(stoVerificationRequired)throw new Error(stoSearchProblem || "SerienStream benötigt eine Bestätigung im Browser.");
-  }catch(e){__awLog("exact title lookup failed: "+String(e).slice(0,120))}
-  // The search endpoint may be dynamically rendered. Accept only real links
-  // returned by the site and merge poster art into an existing exact match.
-  var routes=[
-    BASE_URL+"/suche?q="+encodeURIComponent(keyword),
-    BASE_URL+"/suche?term="+encodeURIComponent(keyword)
-  ];
-  for(var i=0;i<routes.length;i++){
-    if(stoVerificationRequired)break;
-    try{
-      var html=await stoSearchPage(routes[i]);
-      if(stoIsSecurityPage(html))continue;
-      var items=stoHtmlSearch(html,keyword);
-      if(items.length)stoSearchPageSucceeded=true;
-      if(!items.length&&html&&!stoVerificationRequired&&typeof networkFetch==="function") {
-        // Client-rendered search results may be absent from the HTTP shell.
-        var hydrated=await stoBrowserPage(routes[i]);
-        if(stoIsSecurityPage(hydrated)){stoVerificationRequired=true;break}
-        if(hydrated)items=stoHtmlSearch(hydrated,keyword);
-        if(items.length || stoExplicitlyEmptySearch(hydrated))stoSearchPageSucceeded=true;
-      }
-      for(var j=0;j<items.length;j++){
-        var item=items[j];
-        if(!seen[item.href]){seen[item.href]=true;all.push(item)}
-        else if(item.image)for(var x=0;x<all.length;x++){
-          if(all[x].href===item.href&&!all[x].image)all[x].image=item.image;
-        }
-      }
-      if(items.length)break;
-    }catch(e){__awLog("search query error: "+String(e).slice(0,120))}
+// Alternative titles are used only as probes; every hit must come from an
+// actual S.to page. Example: "Dexter: Resurrection" is listed as
+// "Dexter: Wiedererwachen". Never invent a result from a slug alone.
+function stoCandidateQueries(keyword){
+ var text=stoClean(keyword),variants=[],seen={};
+ function add(value){value=stoClean(value);if(!value)return;
+  var key=stoNormalizeTitle(value);if(!key||seen[key])return;
+  seen[key]=1;variants.push(value);
+ }
+ add(text);
+ var seasonless=text.replace(/\s+(?:season|staffel)\s*\d{1,2}\s*$/i,"").trim();
+ add(seasonless);
+ if(/^dexter\s*:?\s*resurrection(?:\s+(?:season|staffel)\s*\d+)?$/i.test(seasonless))
+   add("Dexter: Wiedererwachen");
+ var words=seasonless.split(/[\s:]+/).filter(Boolean);
+ // Generic discovery for localized titles; avoid weak "the"/"die" searches.
+ if(words.length>1 && words[0].length>=5 &&
+    !/^(?:other|their|series|movie)$/i.test(words[0]))add(words[0]);
+ return variants.slice(0,4);
+}
+function stoSearchWithin(promise,timeoutMs,fallback){
+ return new Promise(function(resolve){
+  var finished=false,timer=setTimeout(function(){if(finished)return;finished=true;resolve(fallback)},timeoutMs);
+  Promise.resolve(promise).then(function(value){if(finished)return;finished=true;clearTimeout(timer);resolve(value)},
+   function(){if(finished)return;finished=true;clearTimeout(timer);resolve(fallback)});
+ });
+}
+async function stoFastExact(keyword){
+ var slug=stoSlug(keyword);if(slug.length<3)return null;
+ var href=BASE_URL+"/serie/"+slug;
+ try{
+  var html=await __requestText(href,{strictStatus:true,headers:{Accept:"text/html",Referer:BASE_URL+"/"}});
+  if(!html||stoIsSecurityPage(html)||stoIsUnavailablePage(html))return null;
+  var title=stoActualTitle(html);
+  if(stoNormalizeTitle(title)!==stoNormalizeTitle(keyword))return null;
+  if(!/(?:\/staffel-\d+|\/episode-\d+|<h1\b|og:title)/i.test(html))return null;
+  return {title:title,href:href,image:stoImage(html,title)};
+ }catch(e){return null}
+}
+async function stoFastPageSearch(keyword){
+ var url=BASE_URL+"/suche?q="+encodeURIComponent(keyword);
+ try{
+  var html=await __requestText(url,{strictStatus:true,headers:{Accept:"text/html",Referer:BASE_URL+"/"}});
+  if(stoIsSecurityPage(html)){stoVerificationRequired=true;return []}
+  if(!html||stoIsUnavailablePage(html))return [];
+  return stoHtmlSearch(html,keyword);
+ }catch(e){return []}
+}
+async function searchResults(keyword){
+ keyword=stoClean(keyword);
+ if(!keyword)return "[]";
+ stoVerificationRequired=false;
+ var queries=stoCandidateQueries(keyword),all=[],seen={};
+ function append(items){
+  if(!Array.isArray(items))return;
+  for(var i=0;i<items.length;i++){
+   var item=items[i];
+   if(!item||!item.href||!item.title||seen[item.href])continue;
+   seen[item.href]=true;all.push(item);
   }
-  // A network error is not proof that a series is missing.
-  if(stoVerificationRequired && !all.length) {
-    throw new Error(stoSearchProblem || "SerienStream benötigt eine Bestätigung im Browser.");
-  }
-  if(!all.length && !stoSearchPageSucceeded) {
-    throw new Error(stoSearchProblem ||
-      "SerienStream lieferte keine verwertbaren Suchdaten. Die Webseite ist möglicherweise blockiert, hat das Seitenformat geändert oder verlangt eine Browser-Bestätigung. Prüfe zuerst serienstream.to/serie/dexter in Safari.");
-  }
-  // On a partial/blocked search, retain the verified exact title if available.
-  // Never fabricate a result for an unknown title.
-  var q=stoNormalizeTitle(keyword);
-  all.sort(function(a,b){
-    var n=stoNormalizeTitle(a.title),m=stoNormalizeTitle(b.title);
-    return (n===q?0:n.indexOf(q)===0?1:2)-(m===q?0:m.indexOf(q)===0?1:2);
-  });
-  __awLog("search "+keyword+": "+all.length+" matching series");
-  return JSON.stringify(all.slice(0,25));
+ }
+ // Initial exact/known-localized names and ordinary search run in parallel.
+ // The old implementation waited for exact + two search pages + WebKit
+ // hydration sequentially, usually exceeding Unified GER's 7.5s deadline.
+ var exacts=queries.slice(0,3).filter(function(q){return q.length>=5});
+ var first=exacts.map(function(q){return stoSearchWithin(stoFastExact(q),3500,null)});
+ first.push(stoSearchWithin(stoFastPageSearch(queries[0]),3500,[]));
+ var group=await Promise.all(first);
+ for(var g=0;g<group.length;g++)append(Array.isArray(group[g])?group[g]:group[g]?[group[g]]:[]);
+ // If no exact/localized hit, search a distinctive shorter title.
+ if(!all.length&&queries.length>1){
+  var broad=queries[queries.length-1];
+  append(await stoSearchWithin(stoFastPageSearch(broad),2200,[]));
+ }
+ // Last resort: one passive WebKit search; never automate verification.
+ if(!all.length&&!stoVerificationRequired&&typeof networkFetch==="function"){
+  var rendered=await stoSearchWithin(stoBrowserPage(
+   BASE_URL+"/suche?q="+encodeURIComponent(queries[queries.length-1])
+  ),1200,"");
+  if(!stoIsSecurityPage(rendered))
+   append(stoHtmlSearch(rendered,queries[queries.length-1]));
+ }
+ // A blocked lookup is not evidence that no episodes exist.
+ var q=stoNormalizeTitle(keyword);
+ all.sort(function(a,b){
+  var aName=stoNormalizeTitle(a.title),bName=stoNormalizeTitle(b.title);
+  function score(name){return name===q?0:name.indexOf(q)===0?1:
+    /^dexter resurrection/.test(q)&&name==="dexter wiedererwachen"?0:
+    name.indexOf(q.split(" ")[0])>=0?3:6}
+  return score(aName)-score(bName);
+ });
+ __awLog("search "+keyword+": "+all.length+" grounded results");
+ return JSON.stringify(all.slice(0,30));
 }
 
 async function extractDetails(url){
@@ -402,6 +434,11 @@ function stoSeasonNumbers(html,root){
  while((m=regex.exec(text))!==null)if(m[1]===slug)seen[Number(m[2])]=true;
  var tabs=/(?:data-season(?:-number)?=["'](\d+)["']|<option[^>]*value=["'](\d+)["'][^>]*>\s*Staffel\s+\d+)/gi;
  while((m=tabs.exec(text))!==null)seen[Number(m[1]||m[2])]=true;
+ // New S.to sometimes server-renders S1 only; the title's official
+ // "Kommende Episode S02E04" marker identifies another season to check.
+ // We still verify the season page/episode page before exposing links.
+ var next=/(?:kommende|nächste|neueste|aktuelle)\s+episode[^<\n]{0,180}?S0?(\d{1,2})\s*E0?\d{1,3}/gi;
+ while((m=next.exec(text))!==null)seen[Number(m[1])]=true;
  for(var key in seen)if(Number(key)>=1 && Number(key)<=99)list.push(Number(key));
  return list.sort(function(a,b){return a-b});
 }
@@ -414,6 +451,23 @@ function stoEpisodeLinks(html,root,season){
   seen[url]=true;list.push({href:url,number:n});
  }
  return list.sort(function(a,b){return a.number-b.number});
+}
+// A verified episode page can supply a missing latest release when the
+// season index is client-rendered. Never show a scheduled-only episode.
+function stoLatestPublishedHint(html,season) {
+ var text=stoReadable(html),match,latest=0;
+ var re=/(?:kommende|nächste|neueste|aktuelle)\s+episode[^<\n]{0,180}?S0?(\d{1,2})\s*E0?(\d{1,3})/gi;
+ while((match=re.exec(text))!==null)if(Number(match[1])===season)latest=Math.max(latest,Number(match[2]));
+ return latest;
+}
+function stoIsPublishedEpisode(html,season,number) {
+ var text=stoReadable(html);
+ if(stoIsSecurityPage(text)||stoIsUnavailablePage(text))return false;
+ var header=/<h[12]\b[^>]*>[\s\S]{0,140}?S0?(\d{1,2})\s*E0?(\d{1,3})\b/i.exec(text);
+ if(!header||Number(header[1])!==season||Number(header[2])!==number)return false;
+ // A real episode with a German audio selector/hoster. The site may use a
+ // button or a provider list; plain metadata about a future episode is not enough.
+ return /(?:data-language-id=["']1["']|data-language-label=["']Deutsch["']|>\s*Deutsch\s*<|Deutsch\s+(?:VOE|Doodstream))/i.test(text);
 }
 function stoNumbersInTable(html){
  var text=stoReadable(html),rows=text.match(/<tr\b[^>]*>[\s\S]*?<\/tr>/gi)||[],found={},i;
@@ -461,6 +515,22 @@ async function extractEpisodes(url){
       if(nums.length){
         links=nums.map(function(n){return {href:href+"/episode-"+n,number:n}});
         __awLog("Season "+season+": "+links.length+" episodes from existing page table");
+      }
+    }
+    // Do not use the schedule as evidence of a playable episode.
+    // Verify a single most recent, explicitly advertised SxxExx page when
+    // the season index exposes no actual episode links.
+    if(!links.length && season>1){
+      var last=stoLatestPublishedHint(overview,season);
+      if(last>0&&last<=300){
+        var episodeURL=href+"/episode-"+last;
+        var episodeHTML=await __requestText(episodeURL,{
+          headers:{Accept:"text/html",Referer:root}
+        });
+        if(stoIsPublishedEpisode(episodeHTML,season,last)){
+          links=[{href:episodeURL,number:last}];
+          __awLog("Season "+season+": validated recent episode "+last);
+        }
       }
     }
     results[i]=links;
