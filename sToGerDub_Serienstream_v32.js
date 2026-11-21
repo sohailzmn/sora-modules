@@ -1,5 +1,5 @@
 /*
- * s.to (GER DUB) 1.10.0
+ * s.to (GER DUB) 1.10.1
  * Self-contained Sora/Shirox module: no remote source evaluation, credentials or placeholder streams.
  */
 var BASE_URL = "https://serienstream.to";
@@ -19,7 +19,7 @@ async function __requestText(url, options) {
     try {
       response = await fetch(url, options);
     } catch (e2) {
-      console.log("[SerienStream v1.10.0] request failed:", url, e2);
+      console.log("[SerienStream v1.10.1] request failed:", url, e2);
       return "";
     }
   }
@@ -52,8 +52,8 @@ function __absolute(url) {
 }
 
 function __awLog(message) {
-  if (typeof console !== "undefined" && typeof console.warn === "function") console.warn("[SerienStream v1.10.0] " + message);
-  else if (typeof console !== "undefined" && typeof console.log === "function") console.log("[SerienStream v1.10.0] " + message);
+  if (typeof console !== "undefined" && typeof console.warn === "function") console.warn("[SerienStream v1.10.1] " + message);
+  else if (typeof console !== "undefined" && typeof console.log === "function") console.log("[SerienStream v1.10.1] " + message);
 }
 function __awAttr(tag, key) {
   var re = new RegExp("(?:^|\\s)" + key.replace(/[-]/g, "\\-") + "\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s>]+))", "i");
@@ -494,7 +494,11 @@ function stoHosters(html){
   seen[url]=true;out.push({url:url,title:stoClean(provider)||"Hoster"});
  };
  var tags=html.match(/<[^>]*data-play-url\s*=\s*["'][^"']+["'][^>]*>/gi)||[];
- for(var i=0;i<tags.length;i++)add(__awAttr(tags[i],"data-play-url"),__awAttr(tags[i],"data-provider-name")||__awAttr(tags[i],"title"),__awAttr(tags[i],"data-language-label")||__awAttr(tags[i],"data-audio-language"));
+ for(var i=0;i<tags.length;i++){
+  var language=__awAttr(tags[i],"data-language-label")||__awAttr(tags[i],"data-audio-language")||
+    (__awAttr(tags[i],"data-language-id")==="1"?"Deutsch":"");
+  add(__awAttr(tags[i],"data-play-url"),__awAttr(tags[i],"data-provider-name")||__awAttr(tags[i],"title"),language);
+ }
  var langs={},imgs=html.match(/<img\b[^>]*>/gi)||[];
  for(var j=0;j<imgs.length;j++){var k=__awAttr(imgs[j],"data-lang-key");if(k)langs[k]=__awAttr(imgs[j],"title")||__awAttr(imgs[j],"alt")}
  var rows=html.match(/<li\b[^>]*data-lang-key\s*=\s*["'][^"']+["'][\s\S]*?<\/li>/gi)||[];
