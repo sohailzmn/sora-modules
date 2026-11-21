@@ -119,6 +119,17 @@ test("normal domain failure retries the published alternative without changing T
   assert.deepEqual(visited,["https://serienstream.to/serie/dexter","https://serienstream.cx/serie/dexter"]);
 });
 
+test("working alternative also carries through to browser redirects without leaking credentials", async () => {
+  const ctx=instance(),calls=[];
+  ctx.fetchv2=async(url,headers)=>{calls.push({url,headers});return {status:url.includes("serienstream.to")?403:200};};
+  const response=await ctx.__shiroxSourceRequest("https://serienstream.to/serie/dexter",{Cookie:"private",Authorization:"private",Referer:"https://serienstream.to/"},"GET",null);
+  assert.equal(response.status,200);
+  assert.equal(calls[1].headers.Cookie,undefined);
+  assert.equal(calls[1].headers.Authorization,undefined);
+  assert.equal(ctx.__shiroxSourceURL("https://serienstream.to/redirect/123"),"https://serienstream.cx/redirect/123");
+  assert.equal(ctx.__shiroxSourceURL("https://serienstream.to.evil.example/redirect/123"),"https://serienstream.to.evil.example/redirect/123");
+});
+
 test("redirected hoster uses the final player origin for media verification", async () => {
   const ctx=seriesInstance();
   const result=ctx.stoProvider({originalUrl:"https://new-player.example/e/123",requests:["https://voe.sx/e/123"]},"VOE");

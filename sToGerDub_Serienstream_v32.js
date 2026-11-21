@@ -1,10 +1,24 @@
+var __shiroxSourceDomains={};
+function __shiroxSourceURL(url){
+ return String(url).replace(/^(https:\/\/)(aniworld|serienstream)\.to(?=\/|$)/i,function(origin,scheme,name){return __shiroxSourceDomains[name.toLowerCase()]||origin});
+}
 async function __shiroxSourceRequest(url,headers,method,body){
- try{return await fetchv2(url,headers,method,body)}catch(error){
-  var alternate=String(url).replace(/^(https:\/\/)(aniworld)\.to(?=\/|$)/i,"$1$2.cc")
-    .replace(/^(https:\/\/)(serienstream)\.to(?=\/|$)/i,"$1$2.cx");
-  if(alternate===url)throw error;
-  return await fetchv2(alternate,headers,method,body);
- }
+ var target=__shiroxSourceURL(url),response,error;
+ try{response=await fetchv2(target,headers,method,body)}catch(e){error=e}
+ if(response&&[403,502,503,504].indexOf(Number(response.status))<0)return response;
+ var alternate=String(target).replace(/^(https:\/\/)(aniworld)\.to(?=\/|$)/i,"$1$2.cc")
+   .replace(/^(https:\/\/)(serienstream)\.to(?=\/|$)/i,"$1$2.cx");
+ if(alternate===target){if(response)return response;throw error}
+ var scoped={};Object.keys(headers||{}).forEach(function(key){if(!/^(cookie|authorization)$/i.test(key))scoped[key]=headers[key]});
+ try{
+  var next=await fetchv2(alternate,scoped,method,body);
+  if(next&&Number(next.status)>=200&&Number(next.status)<400){
+   var match=alternate.match(/^https:\/\/(aniworld|serienstream)\.(?:cc|cx)/i);
+   if(match)__shiroxSourceDomains[match[1].toLowerCase()]=match[0];
+   return next;
+  }
+  if(response)return response;return next;
+ }catch(e){if(response)return response;throw e}
 }
 // __SHIROX_LANGUAGE_CONTRACT_V2: per-episode language-aware resolver.
 function __shiroxAttr(tag,key){
@@ -321,7 +335,7 @@ async function stoBrowserPage(url) {
   // submit credentials, or claim that a blocked website is searchable.
   if(typeof networkFetch!=="function")return "";
   try {
-    var page=await networkFetch(url,{
+    var page=await networkFetch(__shiroxSourceURL(url),{
       timeoutSeconds:8,cutoff:".m3u8",returnHTML:true,returnCookies:false,
       waitForSelectors:["h1","main","a[href*='/serie/']"],maxWaitTime:2
     });
@@ -696,7 +710,7 @@ async function stoCapture(h,episode){
  var options={timeoutSeconds:8,cutoff:".m3u8",returnHTML:true,returnCookies:false,maxWaitTime:2,
   waitForSelectors:["video","source"],
   clickSelectors:[".vjs-big-play-button",".jw-icon-display","button[aria-label='Play']",".art-icon-play[aria-label='Play']"]};
- var first=await networkFetch(h.url,Object.assign({},options,{headers:{Referer:episode,"X-Shirox-SerienStream-Episode":episode}}));
+ var first=await networkFetch(__shiroxSourceURL(h.url),Object.assign({},options,{headers:{Referer:episode,"X-Shirox-SerienStream-Episode":episode}}));
  if(first&&stoPlayerBlocked(first.html))return {blockedReason:"website_verification_required"};
  if(!first||first.success===false)return null;
  var blocked=false,external=stoProvider(first,h.title),captures=[{data:first,base:external||h.url}];
