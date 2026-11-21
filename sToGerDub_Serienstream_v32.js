@@ -565,7 +565,7 @@ function stoNumbersInTable(html){
  while((m=re.exec(text))!==null)if(Number(m[1])>0)found[Number(m[1])]=true;
  return Object.keys(found).map(Number).sort(function(a,b){return a-b});
 }
-async function extractEpisodes(url){
+async function extractEpisodes(url,options){
  var root=stoSeries(url);
  if(!root)return "[]";
  try{
@@ -576,10 +576,11 @@ async function extractEpisodes(url){
     return "[]";
   }
   if(!overview){__awLog("episodes overview empty");return "[]"}
-  var seasons=stoSeasonNumbers(overview,root),requested=stoSeason(url);
+  var seasons=stoSeasonNumbers(overview,root),requested=Number(options&&options.season)||stoSeason(url);
   if(requested>0&&seasons.indexOf(requested)<0)seasons.push(requested);
   if(!seasons.length)seasons=[1];
   seasons.sort(function(a,b){return a-b});
+  if(options&&options.season)seasons=seasons.filter(function(s){return s===Number(options.season)});
   var results=new Array(seasons.length),cursor=0;
   async function worker(){
    while(cursor<seasons.length){

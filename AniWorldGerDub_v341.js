@@ -223,7 +223,7 @@ function __awEpisodeLinks(html,root,expectedSeason){
   links.sort(function(a,b){return a.localNumber-b.localNumber});
   return links;
 }
-async function extractEpisodes(url) {
+async function extractEpisodes(url,options) {
   var root=__awSeriesRoot(url);
   if(!root){__awLog("Episode list: invalid series URL");return JSON.stringify([])}
   try{
@@ -236,11 +236,12 @@ async function extractEpisodes(url) {
     var seasons=__awSeasonLinks(initial,root);
     // When the site omits the nav on a one-season title, use S1 from overview.
     if(!seasons.length)seasons=[{number:1,url:root+"/staffel-1"}];
-    var suppliedSeason=Number((String(url).match(/\/staffel-(\d+)/i)||[])[1]||0);
+    var suppliedSeason=Number(options&&options.season)||Number((String(url).match(/\/staffel-(\d+)/i)||[])[1]||0);
     if(suppliedSeason && !seasons.some(function(s){return s.number===suppliedSeason})){
       seasons.push({number:suppliedSeason,url:root+"/staffel-"+suppliedSeason});
       seasons.sort(function(a,b){return a.number-b.number});
     }
+    if(options&&options.season)seasons=seasons.filter(function(s){return s.number===Number(options.season)});
     var seasonResults=new Array(seasons.length);
     // Limited concurrency avoids a long chain of sequential network requests
     // without sending every season of a very long anime at once.

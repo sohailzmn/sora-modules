@@ -229,7 +229,7 @@ function __awEpisodeLinks(html,root,expectedSeason){
   links.sort(function(a,b){return a.localNumber-b.localNumber});
   return links;
 }
-async function extractEpisodes(url) {
+async function extractEpisodes(url,options) {
   var root=__awSeriesRoot(url);
   if(!root){__awLog("Episode list: invalid series URL");return JSON.stringify([])}
   try{
@@ -242,11 +242,12 @@ async function extractEpisodes(url) {
     var seasons=__awSeasonLinks(initial,root);
     // When the site omits the nav on a one-season title, use S1 from overview.
     if(!seasons.length)seasons=[{number:1,url:root+"/staffel-1"}];
-    var suppliedSeason=Number((String(url).match(/\/staffel-(\d+)/i)||[])[1]||0);
+    var suppliedSeason=Number(options&&options.season)||Number((String(url).match(/\/staffel-(\d+)/i)||[])[1]||0);
     if(suppliedSeason && !seasons.some(function(s){return s.number===suppliedSeason})){
       seasons.push({number:suppliedSeason,url:root+"/staffel-"+suppliedSeason});
       seasons.sort(function(a,b){return a.number-b.number});
     }
+    if(options&&options.season)seasons=seasons.filter(function(s){return s.number===Number(options.season)});
     var seasonResults=new Array(seasons.length);
     // Limited concurrency avoids a long chain of sequential network requests
     // without sending every season of a very long anime at once.
@@ -1049,7 +1050,7 @@ function stoNumbersInTable(html){
  while((m=re.exec(text))!==null)if(Number(m[1])>0)found[Number(m[1])]=true;
  return Object.keys(found).map(Number).sort(function(a,b){return a-b});
 }
-async function extractEpisodes(url){
+async function extractEpisodes(url,options){
  var root=stoSeries(url);
  if(!root)return "[]";
  try{
@@ -1060,10 +1061,11 @@ async function extractEpisodes(url){
     return "[]";
   }
   if(!overview){__awLog("episodes overview empty");return "[]"}
-  var seasons=stoSeasonNumbers(overview,root),requested=stoSeason(url);
+  var seasons=stoSeasonNumbers(overview,root),requested=Number(options&&options.season)||stoSeason(url);
   if(requested>0&&seasons.indexOf(requested)<0)seasons.push(requested);
   if(!seasons.length)seasons=[1];
   seasons.sort(function(a,b){return a-b});
+  if(options&&options.season)seasons=seasons.filter(function(s){return s===Number(options.season)});
   var results=new Array(seasons.length),cursor=0;
   async function worker(){
    while(cursor<seasons.length){
@@ -1252,7 +1254,7 @@ var __UNIFIED_SOURCES=[
 /* All source requests are bounded. A blocked / unresponsive S.to response must
  * not prevent AniWorld results from rendering in the app. Timers are provided
  * by Shirox's native JSContext bridge, not by a remote service. */
-var __UNIFIED_SEARCH_TIMEOUT_MS = 7500;
+var __UNIFIED_SEARCH_TIMEOUT_MS = 3500;
 var __UNIFIED_EPISODES_TIMEOUT_MS = 22000;
 var __UNIFIED_STREAMS_TIMEOUT_MS = 32000;
 function __unifiedWithin(promise, timeoutMs, fallback, operation) {
@@ -1326,14 +1328,15 @@ async function __unifiedDirectAniWorld(keyword){
     return [];
   }
 }
-async function searchResults(keyword){
+async function searchResults(keyword,options){
   // Run the verified public-page lookup alongside the two site APIs, not
   // after them. A blocked S.to request can now be safely timed out.
   var direct=__unifiedWithin(
-    __unifiedDirectAniWorld(keyword), __UNIFIED_SEARCH_TIMEOUT_MS,
+    options&&options.kind!=="anime"?Promise.resolve([]):__unifiedDirectAniWorld(keyword), __UNIFIED_SEARCH_TIMEOUT_MS,
     [], "aniworld direct lookup"
   );
-  var batch=await Promise.all(__UNIFIED_SOURCES.map(async function(source){
+  var selectedSources=__UNIFIED_SOURCES.filter(function(source){return !options||!options.kind||(options.kind==="anime"?source.id==="aniworld":source.id==="serienstream")});
+  var batch=await Promise.all(selectedSources.map(async function(source){
     try{
       var raw=await __unifiedWithin(
         source.api.searchResults(keyword), __UNIFIED_SEARCH_TIMEOUT_MS,
@@ -1366,11 +1369,11 @@ async function extractDetails(url){
   try{return __unifiedJSON(await source.api.extractDetails(url),{})}
   catch(e){return JSON.stringify({})}
 }
-async function extractEpisodes(url){
+async function extractEpisodes(url,options){
   var source=__unifiedProvider(url);
   if(!source)return "[]";
   try{return __unifiedJSON(await __unifiedWithin(
-    source.api.extractEpisodes(url), __UNIFIED_EPISODES_TIMEOUT_MS,
+    source.api.extractEpisodes(url,options), __UNIFIED_EPISODES_TIMEOUT_MS,
     "[]", source.id + " episodes"
   ),[])}
   catch(e){if(typeof console!=="undefined")console.warn("[Unified GER] episodes: "+String(e));return "[]"}

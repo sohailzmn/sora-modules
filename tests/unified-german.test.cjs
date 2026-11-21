@@ -297,3 +297,28 @@ test("English remains eligible when a hoster exposes both German and English sof
  const capture=async()=>({streamUrl:"https://media.example/v.m3u8",audioLanguage:"en",allSubtitles:[{lang:"de"},{lang:"en"}]});
  assert.equal((await ctx.__shiroxResolveLanguage(hosters,capture,{languagePriority:2})).length,1);
 });
+
+test("a series lookup does not wait for the unrelated anime catalogue",async()=>{
+ const ctx=instance();
+ let animeCalls=0;
+ ctx.__UNIFIED_SOURCES[0].api.searchResults=async()=>{animeCalls++;return new Promise(()=>{})};
+ ctx.__UNIFIED_SOURCES[1].api.searchResults=async()=>JSON.stringify([{title:"Dexter",href:"/serie/dexter",image:""}]);
+ const results=JSON.parse(await ctx.searchResults("Dexter",{kind:"series"}));
+ assert.equal(animeCalls,0);
+ assert.equal(results.length,1);
+});
+
+test("targeted season lookup does not fetch unrelated seasons",async()=>{
+ const ctx=seriesInstance();
+ const visited=[];
+ ctx.__requestText=async url=>{
+  visited.push(url);
+  if(url.endsWith("/serie/dexter"))return '<h1>Dexter</h1><a href="/serie/dexter/staffel-1">Staffel 1</a><a href="/serie/dexter/staffel-2">Staffel 2</a>';
+  if(url.endsWith("/staffel-2"))return '<a href="/serie/dexter/staffel-2/episode-6">Folge 6</a>';
+  throw new Error("Unrelated season must not be requested");
+ };
+ const episodes=JSON.parse(await ctx.extractEpisodes("https://serienstream.to/serie/dexter",{season:2}));
+ assert.equal(episodes.length,1);
+ assert.equal(episodes[0].href,"https://serienstream.to/serie/dexter/staffel-2/episode-6");
+ assert.ok(!visited.some(url=>url.endsWith("/staffel-1")));
+});
