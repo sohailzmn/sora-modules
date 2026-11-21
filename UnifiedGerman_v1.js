@@ -1,4 +1,4 @@
-/* Shirox Unified German v1.1.0
+/* Shirox Unified German v1.1.1
  * Two isolated provider runtimes. No shared globals between their parsers.
  * Bundled source code (not remote eval). Fetches use Shirox's existing
  * fetchv2/networkFetch bridges. No AniBridge server or API key required.
@@ -463,6 +463,12 @@ async function extractStreamUrl(url){
   try{
     var html=await __requestText(url,{headers:{Accept:"text/html,application/xhtml+xml",Referer:BASE_URL+"/"}});
     if(!html){__awLog("episode page is empty");return JSON.stringify({streams:[],subtitles:[]})}
+    // An access challenge is not a media page. Surface the actual reason
+    // instead of silently reporting an episode as unavailable.
+    if(/(?:cf-turnstile|cf-challenge|__cf_chl_|challenges\.cloudflare\.com|cf-mitigated|<title[^>]*>\s*just a moment|checking your browser|verify you are human)/i.test(html)){
+      __awLog("Episode host requires website verification");
+      return JSON.stringify({streams:[],subtitles:[],blockedReason:"website_verification_required"});
+    }
     var hosters=__awHosters(html);
     __awLog("German hosters: "+hosters.map(function(x){return x.title}).join(", "));
     if(typeof networkFetch!=="function")__awLog("browser fetch is unavailable");
@@ -1143,7 +1149,7 @@ async function extractStreamUrl(url){
     if(stoPlayerBlocked(html)){
       stoVerificationRequired=true;
       __awLog("Episode page requires website verification; stop instead of fetching hosters");
-      return JSON.stringify({streams:[],subtitles:[]});
+      return JSON.stringify({streams:[],subtitles:[],blockedReason:"website_verification_required"});
     }
     var hosters=stoHosters(html);
     __awLog("German hosters: "+hosters.length);
@@ -1313,7 +1319,12 @@ async function extractStreamUrl(url){
       if(!link||!/^https?:\/\//i.test(link)||seen[link])continue;
       seen[link]=true;streams.push(stream);
     }
-    return JSON.stringify({streams:streams,subtitles:data.subtitles||[]});
+    return JSON.stringify({
+      streams:streams,
+      subtitles:data.subtitles||[],
+      blockedReason:data.blockedReason==="website_verification_required"
+        ?"website_verification_required":undefined
+    });
   }catch(e){
     if(typeof console!=="undefined")console.warn("[Unified GER] streams: "+String(e));
     return JSON.stringify({streams:[],subtitles:[]});
