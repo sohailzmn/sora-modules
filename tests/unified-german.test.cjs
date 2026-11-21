@@ -6,6 +6,65 @@ const vm = require("node:vm");
 const { test } = require("node:test");
 
 const source = fs.readFileSync(path.join(__dirname, "..", "UnifiedGerman_v1.js"), "utf8");
+function seriesInstance() {
+  const ctx = instance();
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "sToGerDub_Serienstream_v32.js"), "utf8"), ctx);
+  return ctx;
+}
+
+test("a stalled first mirror cannot hide a working alternative", async () => {
+  const ctx = seriesInstance();
+  const calls = [];
+  ctx.stoCapture = async hoster => {
+    calls.push(hoster.title);
+    if (hoster.title === "stalled") return new Promise(() => {});
+    return {streamUrl:"https://media.example/working.m3u8",title:hoster.title};
+  };
+  const streams = await ctx.stoResolveHosters([
+    {title:"stalled"}, {title:"working"}
+  ], "episode", 100, 5);
+  assert.equal(streams.length, 1);
+  assert.deepEqual(calls, ["stalled", "working"]);
+});
+
+test("mirror resolution is bounded and never retries a failed hoster", async () => {
+  const ctx = seriesInstance();
+  let calls = 0;
+  ctx.stoCapture = async () => { calls++; throw new Error("blocked"); };
+  assert.equal((await ctx.stoResolveHosters(Array.from({length:8}, () => ({title:"dead"})), "episode", 50, 5)).length, 0);
+  assert.equal(calls, 4);
+  ctx.stoCapture = () => new Promise(() => {});
+  assert.equal((await ctx.stoResolveHosters([{title:"hung"}], "episode", 10, 5)).length, 0);
+});
+
+test("series metadata reads Open Graph regardless of attribute order", async () => {
+  const ctx = seriesInstance();
+  ctx.__requestText = async () => '<h1>Dexter</h1>' +
+    '<meta content="A real series synopsis" property="og:description">' +
+    '<meta content="/cover/dexter.jpg" property="og:image">';
+  const details = JSON.parse(await ctx.extractDetails("https://serienstream.to/serie/dexter"))[0];
+  assert.equal(details.description, "A real series synopsis");
+  assert.equal(details.image, "https://serienstream.to/cover/dexter.jpg");
+});
+
+test("unified playback automatically uses an available hoster when the first stalls", async () => {
+  const ctx = instance();
+  const episode = "https://serienstream.to/serie/dexter-wiedererwachen/staffel-2/episode-6";
+  const visited = [];
+  ctx.fetchv2 = async url => ({status:200, text:async()=>url===episode ?
+    '<button data-play-url="/r?t=stalled" data-provider-name="VOE" data-language-id="1"></button>' +
+    '<button data-play-url="/r?t=working" data-provider-name="Vidmoly" data-language-id="1"></button>' :
+    '#EXTM3U\n#EXTINF:10,\nsegment.ts'});
+  ctx.networkFetch = async url => {
+    visited.push(url);
+    if(url.includes("stalled"))return new Promise(()=>{});
+    return {success:true,requests:["https://media.example/video.m3u8"],html:""};
+  };
+  const result = JSON.parse(await ctx.extractStreamUrl(episode));
+  assert.equal(result.streams[0].streamUrl,"https://media.example/video.m3u8");
+  assert.equal(visited.length,2);
+  assert.equal(result.blockedReason,undefined);
+});
 function instance() {
   const context = vm.createContext({
     console: { warn() {}, log() {} },

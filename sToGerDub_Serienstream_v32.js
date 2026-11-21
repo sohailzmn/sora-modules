@@ -441,7 +441,7 @@ async function extractDetails(url){
   var desc=__awAttr((html.match(/<p\b[^>]*class=["'][^"']*seri_des[^"']*["'][^>]*>/i)||[""])[0],"data-full-description")||
    (html.match(/<meta\b[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i)||[])[1]||"";
   var aliases=__awAttr((html.match(/<h1\b[^>]*>/i)||[""])[0],"data-alternativetitles");
-  return JSON.stringify([{description:stoClean(desc),aliases:stoClean(aliases),airdate:""}]);
+  return JSON.stringify([{description:stoClean(desc||stoMeta(html,"og:description")),aliases:stoClean(aliases),airdate:"",image:stoImage(html,stoActualTitle(html))}]);
  }catch(e){return JSON.stringify([{description:"",aliases:"",airdate:""}])}
 }
 
@@ -617,12 +617,14 @@ async function stoCapture(h,episode){
   waitForSelectors:["video","source"],
   clickSelectors:[".vjs-big-play-button",".jw-icon-display","button[aria-label='Play']",".art-icon-play[aria-label='Play']"]};
  var first=await networkFetch(h.url,Object.assign({},options,{headers:{Referer:episode,"X-Shirox-SerienStream-Episode":episode}}));
- if(!first||first.success===false||stoPlayerBlocked(first.html))return null;
- var external=stoProvider(first,h.title),captures=[{data:first,base:external||h.url}];
+ if(first&&stoPlayerBlocked(first.html))return {blockedReason:"website_verification_required"};
+ if(!first||first.success===false)return null;
+ var blocked=false,external=stoProvider(first,h.title),captures=[{data:first,base:external||h.url}];
  if(external){
   try{
    var second=await networkFetch(external,Object.assign({},options,{headers:{Referer:BASE_URL+"/"}}));
-   if(second&&second.success!==false&&!stoPlayerBlocked(second.html))captures.unshift({data:second,base:external});
+   if(second&&stoPlayerBlocked(second.html))blocked=true;
+   else if(second&&second.success!==false)captures.unshift({data:second,base:external});
   }catch(e){__awLog("hoster "+h.title+" second player failed")}
  }
  for(var i=0;i<captures.length;i++){
@@ -633,7 +635,7 @@ async function stoCapture(h,episode){
    if(verified)return {title:h.title+" · GER DUB",streamUrl:verified.streamUrl,headers:verified.headers};
   }
  }
- return null;
+ return blocked?{blockedReason:"website_verification_required"}:null;
 }
 
 function stoPlayerBlocked(html){
@@ -642,7 +644,40 @@ function stoPlayerBlocked(html){
   // Avoid loading redirected player URLs while the initial page is challenged.
   return stoIsSecurityPage(html)||/(?:cf-mitigated|__cf_chl_|challenges\.cloudflare\.com)/i.test(String(html||""));
 }
+// Resolve independent mirrors together: a slow/challenged first hoster must
+// not consume the whole Unified resolver deadline before other mirrors run.
+// Native captures are bounded too; no failed mirror is retried in this load.
+function stoResolveHosters(hosters, episode, budgetMs, graceMs) {
+  budgetMs = budgetMs || 22000;
+  graceMs = graceMs || 1500;
+  return new Promise(function(resolve) {
+    var streams = [], seen = {}, pending = Math.min(hosters.length, 4), done = false, grace;
+    var deadline = setTimeout(finish, budgetMs);
+    function finish() {
+      if (done) return;
+      done = true;
+      clearTimeout(deadline);
+      if (grace) clearTimeout(grace);
+      resolve(streams);
+    }
+    if (!pending) { finish(); return; }
+    hosters.slice(0, 4).forEach(function(hoster) {
+      Promise.resolve().then(function() { return stoCapture(hoster, episode); })
+        .then(function(found) {
+          if (done || !found) return;
+          if (found.blockedReason) streams.blockedReason = found.blockedReason;
+          if (!found.streamUrl || seen[found.streamUrl]) return;
+          seen[found.streamUrl] = true;
+          streams.push(found);
+          if (streams.length >= 2) finish();
+          else if (!grace) grace = setTimeout(finish, graceMs);
+        }, function() { __awLog("Hoster " + hoster.title + " unavailable"); })
+        .then(function() { if (--pending === 0) finish(); });
+    });
+  });
+}
 async function extractStreamUrl(url){
+  stoVerificationRequired=false;
   try{
     var episode=stoCanon(url);
     var html=await __requestText(episode,{headers:{Accept:"text/html,application/xhtml+xml",Referer:BASE_URL+"/"}});
@@ -654,19 +689,8 @@ async function extractStreamUrl(url){
     }
     var hosters=stoHosters(html);
     __awLog("German hosters: "+hosters.length);
-    // Bounded mirrors: at most 3 hosters, stop after 2 usable streams.
-    // Prefer saved provider ordering; an interactive check is not automated.
-    var streams=[], seen={};
-    for(var i=0;i<Math.min(hosters.length,3);i++){
-      try{
-        var found=await stoCapture(hosters[i],episode);
-        if(!found||!found.streamUrl||seen[found.streamUrl])continue;
-        seen[found.streamUrl]=true;
-        streams.push(found);
-        if(streams.length>=2)break;
-      }catch(e){__awLog("Hoster "+hosters[i].title+" failed: "+String(e).slice(0,100))}
-    }
+    var streams=await stoResolveHosters(hosters,episode);
     if(streams.length)return JSON.stringify({streams:streams,subtitles:[]});
   }catch(e){__awLog("Stream load failed: "+String(e).slice(0,145))}
-  return JSON.stringify({streams:[],subtitles:[]});
+  return JSON.stringify({streams:[],subtitles:[],blockedReason:(streams&&streams.blockedReason)||(stoVerificationRequired?"website_verification_required":undefined)});
 }
