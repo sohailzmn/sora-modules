@@ -65,6 +65,7 @@ function __shiroxStreamPriority(stream){
 }
 async function __shiroxResolveLanguage(hosters,capture,options){
  var specified=options&&typeof options.languagePriority==="number",first=specified?options.languagePriority:0,last=specified?first:2;
+ var blockedReason=null;
  for(var priority=first;priority<=last;priority++){
   var candidates=hosters.filter(function(h){var l=h.language||{};return l.languagePriority===priority||(priority>0&&l.languagePriority===3)}).slice(0,12);
   if(!candidates.length)continue;
@@ -77,16 +78,17 @@ async function __shiroxResolveLanguage(hosters,capture,options){
      Promise.resolve(hoster).then(capture).then(function(value){
       if(done)return;
       var values=Array.isArray(value)?value:[value];
-      values.forEach(function(s){if(s&&s.streamUrl&&(priority===0?s.audioLanguage==="de":s.audioLanguage!=="de"&&(s.isHardsub&&s.subtitleLanguage===(priority===1?"de":"en")||(s.allSubtitles||[]).some(function(t){return priority===1?/^(de|deu|ger)(-|$)/i.test(t.lang):/^(en|eng)(-|$)/i.test(t.lang)})))&&!seen[s.streamUrl]){seen[s.streamUrl]=true;out.push(s)}});
+      values.forEach(function(s){if(s&&s.blockedReason)out.blockedReason=s.blockedReason;if(s&&s.streamUrl&&(priority===0?s.audioLanguage==="de":s.audioLanguage!=="de"&&(s.isHardsub&&s.subtitleLanguage===(priority===1?"de":"en")||(s.allSubtitles||[]).some(function(t){return priority===1?/^(de|deu|ger)(-|$)/i.test(t.lang):/^(en|eng)(-|$)/i.test(t.lang)})))&&!seen[s.streamUrl]){seen[s.streamUrl]=true;out.push(s)}});
       if(out.length>=2)finish();else if(out.length&&!grace)grace=setTimeout(finish,500);
      },function(){}).then(function(){active--;if(!done){if(next===candidates.length&&active===0)finish();else pump()}});
     }
    }
    pump();
   });
+  if(streams.blockedReason)blockedReason=streams.blockedReason;
   if(streams.length)return streams;
  }
- return [];
+ var empty=[];if(blockedReason)empty.blockedReason=blockedReason;return empty;
 }
 
 const BASE_URL = "https://aniworld.to";

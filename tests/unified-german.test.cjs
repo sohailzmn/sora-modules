@@ -142,6 +142,13 @@ test("a public player demo clip is never accepted as an episode", () => {
   assert.deepEqual(Array.from(values),["https://media.example/episode.m3u8"]);
 });
 
+test("a blocked hoster stays distinguishable from a genuinely empty episode", async () => {
+  const ctx=instance();
+  const result=await ctx.__shiroxResolveLanguage([{language:{languagePriority:0}}],async()=>({blockedReason:"website_verification_required"}),{languagePriority:0});
+  assert.equal(result.length,0);
+  assert.equal(result.blockedReason,"website_verification_required");
+});
+
 test("SerienStream browser search survives its eight-second capture", async () => {
   const ctx=instance(),unifiedSearch=ctx.searchResults;
   vm.runInContext(fs.readFileSync(path.join(__dirname,"..","sToGerDub_Serienstream_v32.js"),"utf8"),ctx);
