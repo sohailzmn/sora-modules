@@ -1,4 +1,4 @@
-/* Shirox Unified German v1.0.2
+/* Shirox Unified German v1.0.3
  * Two isolated provider runtimes. No shared globals between their parsers.
  * Bundled source code (not remote eval). Fetches use Shirox's existing
  * fetchv2/networkFetch bridges. No AniBridge server or API key required.
@@ -1126,7 +1126,44 @@ function __unifiedAbsolute(source,href){
   if(h.charAt(0)==="/")return source.base+h;
   return source.base+"/"+h.replace(/^\/+/, "");
 }
+// Validated direct-title lookup for AniWorld: its public series page can be
+// available while the AJAX search endpoint fails. Do not invent a search hit:
+// validate the page's actual title and season navigation.
+function __unifiedExactTitle(value){
+  return String(value || "").replace(/<[^>]*>/g, " ").replace(/&amp;/gi,"&")
+    .replace(/\s+/g," ").trim().toLowerCase();
+}
+async function __unifiedDirectAniWorld(keyword){
+  var base=String(keyword || "").trim()
+    .replace(/\s+(?:season|staffel)\s*\d{1,2}\s*$/i,"")
+    .replace(/\s+s\d{1,2}\s*$/i,"").trim();
+  if(base.length<3)return [];
+  var slug=base.toLowerCase().normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/g,"-")
+    .replace(/^-|-$/g,"");
+  if(slug.length<3)return [];
+  var url="https://aniworld.to/anime/stream/"+slug;
+  try{
+    var response=await fetchv2(url,{"Accept":"text/html","Referer":"https://aniworld.to/"}, "GET", null);
+    if(!response || (typeof response.status==="number" && response.status!==200))return [];
+    var html=typeof response.text==="function"?await response.text():"";
+    if(!/<h1\b/i.test(html)||!/\/staffel-\d+/i.test(html))return [];
+    var heading=(html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i)||[])[1]||"";
+    var title=heading.replace(/<[^>]*>/g," ").replace(/\s+/g," ").trim();
+    if(__unifiedExactTitle(title)!==__unifiedExactTitle(base))return [];
+    return [{title:title,image:"",href:url}];
+  }catch(e){
+    if(typeof console!=="undefined")console.warn("[Unified GER] validated AniWorld lookup: "+String(e));
+    return [];
+  }
+}
 async function searchResults(keyword){
+  // Run the verified public-page lookup alongside the two site APIs, not
+  // after them. A blocked S.to request can now be safely timed out.
+  var direct=__unifiedWithin(
+    __unifiedDirectAniWorld(keyword), __UNIFIED_SEARCH_TIMEOUT_MS,
+    [], "aniworld direct lookup"
+  );
   var batch=await Promise.all(__UNIFIED_SOURCES.map(async function(source){
     try{
       var raw=await __unifiedWithin(
@@ -1144,6 +1181,8 @@ async function searchResults(keyword){
       return [];
     }
   }));
+  var directResults=await direct;
+  if(Array.isArray(directResults)&&directResults.length)batch.unshift(directResults);
   var seen={},results=[];
   for(var i=0;i<batch.length;i++)for(var j=0;j<batch[i].length;j++){
     var row=batch[i][j],key=row.href.toLowerCase();
