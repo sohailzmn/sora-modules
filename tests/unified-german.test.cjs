@@ -124,6 +124,19 @@ test("redirected hoster uses the final player origin for media verification", as
   const result=ctx.stoProvider({originalUrl:"https://new-player.example/e/123",requests:["https://voe.sx/e/123"]},"VOE");
   assert.equal(result,"https://new-player.example/e/123");
 });
+
+test("SerienStream browser search survives its eight-second capture", async () => {
+  const ctx=instance(),unifiedSearch=ctx.searchResults;
+  vm.runInContext(fs.readFileSync(path.join(__dirname,"..","sToGerDub_Serienstream_v32.js"),"utf8"),ctx);
+  ctx.setTimeout=(callback,ms)=>setTimeout(callback,ms/100);
+  ctx.stoFastExact=async()=>null;
+  ctx.stoFastPageSearch=async()=>[];
+  ctx.stoBrowserPage=()=>new Promise(resolve=>ctx.setTimeout(()=>resolve("real rendered catalogue"),8000));
+  ctx.stoHtmlSearch=()=>[{title:"Dexter",image:"",href:"https://serienstream.to/serie/dexter"}];
+  ctx.__UNIFIED_SOURCES[1].api.searchResults=ctx.searchResults;
+  const rows=JSON.parse(await unifiedSearch("Dexter",{kind:"series"}));
+  assert.equal(rows[0].title,"Dexter");
+});
 test("all bundled JavaScript parses in the module runtime", () => {
   assert.ok(instance().__UNIFIED_SOURCES.length === 2);
 });

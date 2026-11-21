@@ -489,7 +489,7 @@ async function searchResults(keyword){
  if(!all.length&&!stoVerificationRequired&&typeof networkFetch==="function"){
   var rendered=await stoSearchWithin(stoBrowserPage(
    BASE_URL+"/suche?q="+encodeURIComponent(queries[queries.length-1])
-  ),1200,"");
+  ),9000,"");
   if(!stoIsSecurityPage(rendered))
    append(stoHtmlSearch(rendered,queries[queries.length-1]));
  }

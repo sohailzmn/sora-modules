@@ -975,7 +975,7 @@ async function searchResults(keyword){
  if(!all.length&&!stoVerificationRequired&&typeof networkFetch==="function"){
   var rendered=await stoSearchWithin(stoBrowserPage(
    BASE_URL+"/suche?q="+encodeURIComponent(queries[queries.length-1])
-  ),1200,"");
+  ),9000,"");
   if(!stoIsSecurityPage(rendered))
    append(stoHtmlSearch(rendered,queries[queries.length-1]));
  }
@@ -1295,12 +1295,18 @@ async function extractCatalog(options){
   var response=await __shiroxSourceRequest(source.base+"/",{Accept:"text/html"},"GET",null);
   if(!response||(typeof response.status==="number"&&response.status!==200))return "[]";
   var html=typeof response.text==="function"?await response.text():String(response);
-  return JSON.stringify(__unifiedCatalogRows(html,kind));
+  var rows=__unifiedCatalogRows(html,kind);
+  if(!rows.length&&typeof networkFetch==="function"){
+    var page=await networkFetch(source.base+"/",{timeoutSeconds:8,returnHTML:true,returnCookies:false,
+      waitForSelectors:["a[href*='/serie/']","a[href*='/anime/stream/']"],maxWaitTime:2});
+    if(page&&page.success!==false)rows=__unifiedCatalogRows(page.html,kind);
+  }
+  return JSON.stringify(rows);
 }
 /* All source requests are bounded. A blocked / unresponsive S.to response must
  * not prevent AniWorld results from rendering in the app. Timers are provided
  * by Shirox's native JSContext bridge, not by a remote service. */
-var __UNIFIED_SEARCH_TIMEOUT_MS = 3500;
+var __UNIFIED_SEARCH_TIMEOUT_MS = 16000;
 var __UNIFIED_EPISODES_TIMEOUT_MS = 22000;
 var __UNIFIED_STREAMS_TIMEOUT_MS = 32000;
 function __unifiedWithin(promise, timeoutMs, fallback, operation) {
