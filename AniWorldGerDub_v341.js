@@ -489,24 +489,9 @@ function __awParseVariants(content,url){
 async function __awQualityOptions(verified,page,providerName){
   var main={title:providerName+" · Auto HLS",streamUrl:verified.url,headers:verified.headers};
   if(verified.type!=="hls"||!verified.playlist)return[{title:providerName+" · Video",streamUrl:verified.url,headers:verified.headers}];
-  var variants=__awParseVariants(verified.playlist,verified.url);
-  if(!variants.length)return[main];
-  variants.sort(function(a,b){return a.height-b.height||a.bandwidth-b.bandwidth});
-  var preferred=variants.filter(function(x){return x.height<=480});
-  var fast=preferred.length?preferred[preferred.length-1]:variants[0];
-  var hd=variants.filter(function(x){return x.height<=720&&x.height>fast.height});
-  hd=hd.length?hd[hd.length-1]:null;
-  var list=[],choices=[fast];
-  if(hd && hd.url!==fast.url)choices.push(hd);
-  for(var i=0;i<choices.length;i++){
-    var variant=await __awVerify(choices[i].url,page);
-    if(!variant)continue;
-    list.push({title:String(choices[i].height)+"p · "+providerName+(i===0?" (Schnell)":""),streamUrl:variant.url,headers:variant.headers});
-  }
-  if(list.length)list.push(main); // Explicit adaptive fallback if fixed renditions buffer.
-  else list=[main]; // Do not return dead or unverified variants.
-  __awLog("Selected video options: "+list.map(function(x){return x.title}).join(", "));
-  return list;
+  // The verified master already contains adaptive quality and audio choices.
+  // Do not serially load fixed renditions before allowing playback to start.
+  return [main];
 }
 
 

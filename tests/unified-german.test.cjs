@@ -448,3 +448,34 @@ test("targeted season lookup does not fetch unrelated seasons",async()=>{
  assert.equal(episodes[0].href,"https://serienstream.to/serie/dexter/staffel-2/episode-6");
  assert.ok(!visited.some(url=>url.endsWith("/staffel-1")));
 });
+
+
+test("a blocked home HTTP response still reaches normal browser rendering", async () => {
+  const ctx=instance();let rendered=0;
+  ctx.fetchv2=async()=>({status:403,text:async()=>'<title>Just a moment</title>'});
+  ctx.networkFetch=async()=>{rendered++;return {success:true,html:'<a href="/serie/dexter"><h3>Dexter</h3></a>'}};
+  const rows=JSON.parse(await ctx.extractCatalog({kind:"series"}));
+  assert.equal(rendered,1);assert.equal(rows[0].title,"Dexter");
+});
+test("home DNS failure does not skip normal browser fallback", async () => {
+  const ctx=instance();ctx.fetchv2=async()=>{throw Error("DNS")};
+  ctx.networkFetch=async()=>({success:true,html:'<a href="/serie/dexter"><h3>Dexter</h3></a>'});
+  assert.equal(JSON.parse(await ctx.extractCatalog({kind:"series"}))[0].title,"Dexter");
+});
+test("home verification and network errors remain distinct from empty catalogues", async () => {
+  const ctx=instance();ctx.fetchv2=async()=>({status:403,text:async()=>'<title>Just a moment</title>'});
+  ctx.networkFetch=async()=>({success:true,html:'<div class="cf-turnstile"></div>'});
+  assert.equal(JSON.parse(await ctx.extractCatalog({kind:"series"})).blockedReason,"website_verification_required");
+  ctx.fetchv2=async()=>{throw Error("DNS")};ctx.networkFetch=async()=>{throw Error("DNS")};
+  assert.equal(JSON.parse(await ctx.extractCatalog({kind:"series"})).errorCode,"source_unavailable");
+});
+test("search verification failure is not converted to a title miss", async () => {
+  const ctx=instance();ctx.__UNIFIED_SOURCES[1].api.searchResults=async()=>{throw Error("SerienStream benötigt eine Bestätigung im Browser.")};
+  assert.equal(JSON.parse(await ctx.searchResults("Dexter",{kind:"series"})).blockedReason,"website_verification_required");
+});
+test("verified adaptive master starts without serial rendition requests", async () => {
+  const ctx=instance();vm.runInContext(fs.readFileSync(path.join(__dirname,"..","AniWorldGerDub_v341.js"),"utf8"),ctx);
+  ctx.__awVerify=async()=>{throw Error("Unnecessary extra request")};
+  const result=await ctx.__awQualityOptions({url:"https://media.example/master.m3u8",type:"hls",headers:{Referer:"https://player.example"},playlist:'#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=854x480\n480.m3u8'},"https://player.example","VOE");
+  assert.equal(result.length,1);assert.equal(result[0].streamUrl,"https://media.example/master.m3u8");
+});

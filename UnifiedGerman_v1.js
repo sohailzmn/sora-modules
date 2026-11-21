@@ -495,24 +495,8 @@ function __awParseVariants(content,url){
 async function __awQualityOptions(verified,page,providerName){
   var main={title:providerName+" · Auto HLS",streamUrl:verified.url,headers:verified.headers};
   if(verified.type!=="hls"||!verified.playlist)return[{title:providerName+" · Video",streamUrl:verified.url,headers:verified.headers}];
-  var variants=__awParseVariants(verified.playlist,verified.url);
-  if(!variants.length)return[main];
-  variants.sort(function(a,b){return a.height-b.height||a.bandwidth-b.bandwidth});
-  var preferred=variants.filter(function(x){return x.height<=480});
-  var fast=preferred.length?preferred[preferred.length-1]:variants[0];
-  var hd=variants.filter(function(x){return x.height<=720&&x.height>fast.height});
-  hd=hd.length?hd[hd.length-1]:null;
-  var list=[],choices=[fast];
-  if(hd && hd.url!==fast.url)choices.push(hd);
-  for(var i=0;i<choices.length;i++){
-    var variant=await __awVerify(choices[i].url,page);
-    if(!variant)continue;
-    list.push({title:String(choices[i].height)+"p · "+providerName+(i===0?" (Schnell)":""),streamUrl:variant.url,headers:variant.headers});
-  }
-  if(list.length)list.push(main); // Explicit adaptive fallback if fixed renditions buffer.
-  else list=[main]; // Do not return dead or unverified variants.
-  __awLog("Selected video options: "+list.map(function(x){return x.title}).join(", "));
-  return list;
+  // Start with the already verified adaptive master; AVPlayer selects quality.
+  return [main];
 }
 
 
@@ -1328,19 +1312,32 @@ function __unifiedCatalogRows(html,kind){
   });
   return out.slice(0,100);
 }
+function __unifiedSourceFailure(error,html) {
+  var text=String(html||"")+" "+String(error||"");
+  return /cf-turnstile|cf-challenge|__cf_chl_|challenges\.cloudflare\.com|cf-mitigated|<title[^>]*>\s*just a moment|checking your browser|verify you are human|Bestätigung im Browser|website_verification_required/i.test(text)
+    ? {items:[],blockedReason:"website_verification_required"}
+    : {items:[],errorCode:"source_unavailable"};
+}
 async function extractCatalog(options){
   var kind=options&&options.kind;if(kind!=="anime"&&kind!=="series")return "[]";
-  var source=kind==="anime"?__UNIFIED_SOURCES[0]:__UNIFIED_SOURCES[1];
-  var response=await __shiroxSourceRequest(source.base+"/",{Accept:"text/html"},"GET",null);
-  if(!response||(typeof response.status==="number"&&response.status!==200))return "[]";
-  var html=typeof response.text==="function"?await response.text():String(response);
-  var rows=__unifiedCatalogRows(html,kind);
+  var source=kind==="anime"?__UNIFIED_SOURCES[0]:__UNIFIED_SOURCES[1],html="",problem=null,rows=[];
+  try {
+    var response=await __unifiedWithin(__shiroxSourceRequest(source.base+"/",{Accept:"text/html"},"GET",null),4000,null,"catalog HTTP");
+    if(response) {
+      html=typeof response.text==="function"?await response.text():String(response);
+      if(!response.status||response.status===200)rows=__unifiedCatalogRows(html,kind);
+      if(response.status&&response.status!==200)problem="HTTP "+response.status;
+    } else problem="source timeout";
+  } catch(e){problem=e}
+  // HTTP failures must still reach the normal browser fallback.
   if(!rows.length&&typeof networkFetch==="function"){
-    var page=await networkFetch(__shiroxSourceURL(source.base+"/"),{timeoutSeconds:8,returnHTML:true,returnCookies:false,
-      waitForSelectors:["a[href*='/serie/']","a[href*='/anime/stream/']"],maxWaitTime:2});
-    if(page&&page.success!==false)rows=__unifiedCatalogRows(page.html,kind);
+    try {
+      var page=await networkFetch(__shiroxSourceURL(source.base+"/"),{timeoutSeconds:8,returnHTML:true,returnCookies:false,
+        waitForSelectors:[kind==="anime"?"a[href*='/anime/stream/']":"a[href*='/serie/']"],maxWaitTime:2});
+      if(page){html+="\n"+String(page.html||"");if(page.success!==false)rows=__unifiedCatalogRows(page.html,kind)}
+    } catch(e){problem=e}
   }
-  return JSON.stringify(rows);
+  return JSON.stringify(rows.length?rows:__unifiedSourceFailure(problem,html));
 }
 /* All source requests are bounded. A blocked / unresponsive S.to response must
  * not prevent AniWorld results from rendering in the app. Timers are provided
@@ -1427,10 +1424,11 @@ async function searchResults(keyword,options){
     [], "aniworld direct lookup"
   );
   var selectedSources=__UNIFIED_SOURCES.filter(function(source){return !options||!options.kind||(options.kind==="anime"?source.id==="aniworld":source.id==="serienstream")});
+  var sourceFailures=[];
   var batch=await Promise.all(selectedSources.map(async function(source){
     try{
       var raw=await __unifiedWithin(
-        source.api.searchResults(keyword), __UNIFIED_SEARCH_TIMEOUT_MS,
+        Promise.resolve().then(function(){return source.api.searchResults(keyword)}).catch(function(error){sourceFailures.push(__unifiedSourceFailure(error));return "[]"}), __UNIFIED_SEARCH_TIMEOUT_MS,
         "[]", source.id + " search"
       );
       var rows=typeof raw==="string"?JSON.parse(raw):raw;
@@ -1452,6 +1450,7 @@ async function searchResults(keyword,options){
     if(seen[key])continue;
     seen[key]=true;results.push(row);
   }
+  if(!results.length&&sourceFailures.length)return JSON.stringify(sourceFailures.filter(function(x){return x.blockedReason})[0]||sourceFailures[0]);
   return JSON.stringify(results.slice(0,60));
 }
 async function extractDetails(url){
