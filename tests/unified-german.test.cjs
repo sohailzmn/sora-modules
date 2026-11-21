@@ -112,3 +112,27 @@ test("stalled episode and stream lookups return bounded empty results", async ()
   const streams=JSON.parse(await ctx.extractStreamUrl(href));
   assert.equal(streams.streams.length,0);
 });
+
+test("unified source finds validated The Apothecary Diaries S3 when AJAX is blocked", async()=>{
+  const ctx=instance();
+  ctx.__UNIFIED_SEARCH_TIMEOUT_MS=20;
+  ctx.__UNIFIED_SOURCES[0].api.searchResults=()=>new Promise(()=>{});
+  ctx.__UNIFIED_SOURCES[1].api.searchResults=async()=>JSON.stringify([]);
+  ctx.fetchv2=async()=>({
+    status:200,
+    text:async()=>'<html><h1>The Apothecary Diaries</h1><a href="/anime/stream/the-apothecary-diaries/staffel-3/episode-1">Ep 1</a></html>'
+  });
+  const result=JSON.parse(await ctx.searchResults("The Apothecary Diaries Season 3"));
+  assert.equal(result.length,1);
+  assert.equal(result[0].href,"https://aniworld.to/anime/stream/the-apothecary-diaries");
+});
+test("unified direct lookup refuses a wrong title despite HTTP 200",async()=>{
+  const ctx=instance();
+  ctx.__UNIFIED_SOURCES[0].api.searchResults=async()=>JSON.stringify([]);
+  ctx.__UNIFIED_SOURCES[1].api.searchResults=async()=>JSON.stringify([]);
+  ctx.fetchv2=async()=>({
+    status:200,
+    text:async()=>'<html><h1>Unrelated Show</h1><a href="/staffel-3/episode-1">Ep 1</a></html>'
+  });
+  assert.equal(JSON.parse(await ctx.searchResults("The Apothecary Diaries Season 3")).length,0);
+});
