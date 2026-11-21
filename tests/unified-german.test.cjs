@@ -136,6 +136,12 @@ test("redirected hoster uses the final player origin for media verification", as
   assert.equal(result,"https://new-player.example/e/123");
 });
 
+test("a public player demo clip is never accepted as an episode", () => {
+  const ctx=seriesInstance();
+  const values=ctx.__awCandidates({requests:["https://test-videos.co.uk/bigbuckbunny/mp4-h264.mp4","https://media.example/episode.m3u8"]},"https://player.example/e/1");
+  assert.deepEqual(Array.from(values),["https://media.example/episode.m3u8"]);
+});
+
 test("SerienStream browser search survives its eight-second capture", async () => {
   const ctx=instance(),unifiedSearch=ctx.searchResults;
   vm.runInContext(fs.readFileSync(path.join(__dirname,"..","sToGerDub_Serienstream_v32.js"),"utf8"),ctx);

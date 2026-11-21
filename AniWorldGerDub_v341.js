@@ -409,7 +409,7 @@ function __awCandidates(capture, pageUrl) {
   for (var i = 0; i < inputs.length; i++) {
     var item = inputs[i], raw = typeof item === "string" ? item : item && (item.url || item.requestUrl);
     var url = __awAbsolute(raw, pageUrl);
-    if (!url || !__awPublic(url) || !__awMediaKind(url) || /doubleclick|googlesyndication|\/preroll\//i.test(url) || seen[url]) continue;
+    if (!url || !__awPublic(url) || !__awMediaKind(url) || /doubleclick|googlesyndication|test-videos\.co\.uk|\/preroll\//i.test(url) || seen[url]) continue;
     seen[url] = true;
     urls.push(url);
   }
