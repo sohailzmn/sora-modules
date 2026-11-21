@@ -1,5 +1,5 @@
 const BASE_URL = "https://aniworld.to";
-// v3.4.1: standalone, no runtime script downloader.
+// v3.5.0: standalone, no runtime script downloader.
 
 async function __requestText(url, options) {
   options = options || {};
@@ -18,7 +18,7 @@ async function __requestText(url, options) {
     try {
       response = await fetch(url, options);
     } catch (e2) {
-      console.log("[AniWorld v3.4.1] request failed:", url, e2);
+      console.log("[AniWorld v3.5.0] request failed:", url, e2);
       return "";
     }
   }
@@ -96,10 +96,10 @@ async function searchResults(keyword) {
       });
     }
 
-    console.log("[AniWorld v3.4.1] search results:", results.length);
+    console.log("[AniWorld v3.5.0] search results:", results.length);
     return JSON.stringify(results);
   } catch (error) {
-    console.log("[AniWorld v3.4.1] search error:", error);
+    console.log("[AniWorld v3.5.0] search error:", error);
     return JSON.stringify([]);
   }
 }
@@ -223,11 +223,11 @@ async function extractEpisodes(url) {
   }
 }
 
-// v3.4.1: The episode exists but the old fetch-only resolver often sees no media
+// v3.5.0: The episode exists but the old fetch-only resolver often sees no media
 // in hoster pages. Shirox networkFetch observes real browser/player requests.
 function __awLog(message) {
-  if (typeof console !== "undefined" && typeof console.warn === "function") console.warn("[AniWorld v3.4.1] " + message);
-  else if (typeof console !== "undefined" && typeof console.log === "function") console.log("[AniWorld v3.4.1] " + message);
+  if (typeof console !== "undefined" && typeof console.warn === "function") console.warn("[AniWorld v3.5.0] " + message);
+  else if (typeof console !== "undefined" && typeof console.log === "function") console.log("[AniWorld v3.5.0] " + message);
 }
 function __awAttr(tag, key) {
   var re = new RegExp("(?:^|\\s)" + key.replace(/[-]/g, "\\-") + "\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s>]+))", "i");
@@ -448,12 +448,23 @@ async function extractStreamUrl(url){
     var hosters=__awHosters(html);
     __awLog("German hosters: "+hosters.map(function(x){return x.title}).join(", "));
     if(typeof networkFetch!=="function")__awLog("browser fetch is unavailable");
+    // Retain mirrors: if the first CDN expires mid-playback, Shirox can
+    // select another resolved host without refetching the same dead URL.
+    var streams=[], seen={};
     for(var i=0;i<Math.min(3,hosters.length);i++){
       try{
         var result=await __awCapture(hosters[i]);
-        if(result&&result.length)return JSON.stringify({streams:result,subtitles:[]});
+        if(!Array.isArray(result))continue;
+        for(var j=0;j<result.length;j++){
+          var candidate=result[j],key=candidate&&(candidate.streamUrl||candidate.url);
+          if(!key||seen[key])continue;
+          seen[key]=true;
+          streams.push(candidate);
+        }
+        if(streams.length>=3)break;
       }catch(e){__awLog(hosters[i].title+" failed: "+String(e).slice(0,120))}
     }
+    if(streams.length)return JSON.stringify({streams:streams,subtitles:[]});
     __awLog("No working stream from checked German hosters");
   }catch(e){__awLog("stream lookup failed: "+String(e).slice(0,140))}
   return JSON.stringify({streams:[],subtitles:[]});
