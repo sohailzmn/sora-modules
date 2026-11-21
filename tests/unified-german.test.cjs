@@ -136,3 +136,38 @@ test("unified direct lookup refuses a wrong title despite HTTP 200",async()=>{
   });
   assert.equal(JSON.parse(await ctx.searchResults("The Apothecary Diaries Season 3")).length,0);
 });
+
+test("S.to fast search validates German alias for Dexter: Resurrection",async()=>{
+ const context=vm.createContext({console:{warn(){},log(){}},setTimeout,clearTimeout});
+ vm.runInContext(fs.readFileSync(path.join(__dirname,"..","sToGerDub_Serienstream_v32.js"),"utf8"),context);
+ context.__requestText=async(url)=>{
+  if(url.includes("/serie/dexter-wiedererwachen"))
+   return '<html><h1>Dexter: Wiedererwachen</h1><a href="/serie/dexter-wiedererwachen/staffel-2">Staffel 2</a></html>';
+  return '<html><h1>SerienStream</h1></html>';
+ };
+ const results=JSON.parse(await context.searchResults("Dexter: Resurrection"));
+ assert.equal(results.length,1);
+ assert.equal(results[0].href,"https://serienstream.to/serie/dexter-wiedererwachen");
+});
+test("S.to discovers newer season from published latest-episode marker",()=>{
+ const context=vm.createContext({console:{warn(){},log(){}},setTimeout,clearTimeout});
+ vm.runInContext(fs.readFileSync(path.join(__dirname,"..","sToGerDub_Serienstream_v32.js"),"utf8"),context);
+ const html='<h1>Dexter: Wiedererwachen</h1> Kommende Episode S02E04 startet am Freitag';
+ assert.deepEqual(Array.from(context.stoSeasonNumbers(html,"https://serienstream.to/serie/dexter-wiedererwachen")),[2]);
+ assert.ok(context.stoIsPublishedEpisode('<h2>S02E04: Junges Blut</h2><p>Deutsch VOE</p>',2,4));
+ assert.equal(context.stoIsPublishedEpisode('<h2>S02E05: Soon</h2><p>Coming soon</p>',2,5),false);
+});
+test("S.to episode list includes validated recent episode when S2 index is empty",async()=>{
+ const context=vm.createContext({console:{warn(){},log(){}},setTimeout,clearTimeout});
+ vm.runInContext(fs.readFileSync(path.join(__dirname,"..","sToGerDub_Serienstream_v32.js"),"utf8"),context);
+ context.__requestText=async(url)=>{
+  if(url.endsWith("/serie/dexter-wiedererwachen"))
+   return '<h1>Dexter: Wiedererwachen</h1> Kommende Episode S02E04 startet am Freitag <table><tr><td>1</td><td>Episode 1</td></tr></table>';
+  if(url.endsWith("/staffel-2/episode-4"))
+   return '<h1>Dexter: Wiedererwachen</h1><h2>S02E04: Junges Blut</h2><p>Deutsch VOE</p>';
+  return '';
+ };
+ const episodes=JSON.parse(await context.extractEpisodes("https://serienstream.to/serie/dexter-wiedererwachen"));
+ assert.ok(episodes.some(e=>e.href.endsWith("/staffel-2/episode-4")),"most recent verified S2 episode must be present");
+ assert.ok(!episodes.some(e=>e.href.endsWith("/staffel-2/episode-5")),"unpublished episode must not be synthesized");
+});
