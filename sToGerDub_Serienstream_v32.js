@@ -672,17 +672,23 @@ function stoGerman(label){
  return /(deutsch|german|ger dub)/i.test(label)&&!/(untertitel|\bsub\b|subbed)/i.test(label);
 }
 function stoHosters(html){
- html=String(html||"");var out=[],seen={},add=function(href,provider,lang){
+ html=String(html||"");var out=[],seen={},add=function(href,provider,lang,selector){
   var languageMetadata=__shiroxLanguage(lang);if(!languageMetadata)return;
   var url=stoCanon(__awAbsolute(href,BASE_URL+"/"));
   if(!url||!/^https?:\/\/serienstream\.to\//i.test(url)||seen[url])return;
-  seen[url]=true;out.push({url:url,title:stoClean(provider)||"Hoster",language:languageMetadata});
+  seen[url]=true;out.push({url:url,title:stoClean(provider)||"Hoster",language:languageMetadata,selector:selector||null});
  };
  var tags=html.match(/<[^>]*data-play-url\s*=\s*["'][^"']+["'][^>]*>/gi)||[];
  for(var i=0;i<tags.length;i++){
   var language=__awAttr(tags[i],"data-language-label")||__awAttr(tags[i],"data-audio-language")||
     (__awAttr(tags[i],"data-language-id")==="1"?"Deutsch":"");
-  add(__awAttr(tags[i],"data-play-url"),__awAttr(tags[i],"data-provider-name")||__awAttr(tags[i],"title"),language);
+  var provider=__awAttr(tags[i],"data-provider-name"),languageID=__awAttr(tags[i],"data-language-id"),languageLabel=__awAttr(tags[i],"data-language-label");
+  var quote=function(value){return String(value).replace(/\\/g,"\\\\").replace(/"/g,'\\"')};
+  var selector=provider?'[data-provider-name="'+quote(provider)+'"]':"";
+  if(selector&&languageID)selector+='[data-language-id="'+quote(languageID)+'"]';
+  else if(selector&&languageLabel)selector+='[data-language-label="'+quote(languageLabel)+'"]';
+  else selector="";
+  add(__awAttr(tags[i],"data-play-url"),provider||__awAttr(tags[i],"title"),language,selector);
  }
  var langs={},imgs=html.match(/<img\b[^>]*>/gi)||[];
  for(var j=0;j<imgs.length;j++){var k=__awAttr(imgs[j],"data-lang-key");if(k)langs[k]=__awAttr(imgs[j],"title")||__awAttr(imgs[j],"alt")}
@@ -696,7 +702,7 @@ function stoHosters(html){
  return out;
 }
 function stoProvider(capture,provider){
- var finalPage=capture&&capture.originalUrl;
+ var finalPage=capture&&(capture.mediaPageURL||capture.originalUrl||capture.url);
  if(__awPublic(finalPage)&&!/^https?:\/\/(?:www\.)?(?:serienstream\.(?:to|cx)|s\.to)\//i.test(finalPage)&&!__awMediaKind(finalPage))return finalPage;
  var items=Array.isArray(capture&&capture.requests)?capture.requests.slice():[];
  if(capture&&capture.cutoffUrl)items.unshift(capture.cutoffUrl);
@@ -711,16 +717,25 @@ function stoCaptureSummary(capture){
  if(!capture)return "no browser result";
  var title=stoClean((String(capture.html||"").match(/<title[^>]*>([\s\S]*?)<\/title>/i)||[])[1]||"").slice(0,80);
  var origins=[],seen={};(capture.requests||[]).forEach(function(value){var url=typeof value==="string"?value:value&&value.url;var origin=__awOrigin(url||"");if(origin&&!seen[origin]){seen[origin]=true;origins.push(origin)}});
- return "page="+__awOrigin(capture.originalUrl||"")+" title="+title+" requests="+(capture.requests||[]).length+" origins="+origins.slice(0,8).join(",");
+ return "page="+__awOrigin(capture.originalUrl||capture.url||"")+" title="+title+" requests="+(capture.requests||[]).length+" origins="+origins.slice(0,8).join(",");
 }
 async function stoCapture(h,episode){
  if(typeof networkFetch!=="function")return null;
  var options={timeoutSeconds:8,cutoff:".m3u8",returnHTML:true,returnCookies:false,maxWaitTime:2,
   waitForSelectors:["video","source"],
   clickSelectors:[".vjs-big-play-button",".jw-icon-display","button[aria-label='Play']",".art-icon-play[aria-label='Play']"]};
- var first=await networkFetch(__shiroxSourceURL(h.url),Object.assign({},options,{headers:{Referer:episode,"X-Shirox-SerienStream-Episode":episode}}));
+ var pageOptions=Object.assign({},options,{headers:{Referer:episode}});
+ var firstURL=h.url;
+ if(h.selector){
+  // The site's encrypted redirect belongs to its browser session. Activate
+  // the actual provider/language button in that same episode document.
+  firstURL=episode;pageOptions.timeoutSeconds=14;pageOptions.maxWaitTime=3;
+  pageOptions.waitForSelectors=[h.selector];
+  pageOptions.clickSelectors=[h.selector].concat(options.clickSelectors);
+ }
+ var first=await networkFetch(__shiroxSourceURL(firstURL),pageOptions);
  __awLog(h.title+" browser: "+stoCaptureSummary(first));
- if(first&&stoPlayerBlocked(first.html))return {blockedReason:"website_verification_required"};
+ if(first&&stoPlayerBlocked(first.html)&&!__awCandidates(first,first.mediaPageURL||first.originalUrl||first.url||firstURL).length)return {blockedReason:"website_verification_required"};
  if(!first||first.success===false)return null;
  var blocked=false,external=stoProvider(first,h.title),captures=[{data:first,base:external||h.url}];
  if(external && !__awCandidates(first,external||h.url).length){
@@ -728,7 +743,7 @@ async function stoCapture(h,episode){
    var second=await networkFetch(external,Object.assign({},options,{headers:{Referer:BASE_URL+"/"}}));
    __awLog(h.title+" redirected browser: "+stoCaptureSummary(second));
    if(second&&stoPlayerBlocked(second.html))blocked=true;
-   else if(second&&second.success!==false)captures.unshift({data:second,base:__awPublic(second.originalUrl)?second.originalUrl:external});
+   else if(second&&second.success!==false)captures.unshift({data:second,base:__awPublic(second.mediaPageURL||second.originalUrl||second.url)?second.mediaPageURL||second.originalUrl||second.url:external});
   }catch(e){__awLog("hoster "+h.title+" second player failed")}
  }
  for(var i=0;i<captures.length;i++){

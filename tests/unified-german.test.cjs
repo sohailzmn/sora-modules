@@ -55,14 +55,15 @@ test("unified playback automatically uses an available hoster when the first sta
     '<button data-play-url="/r?t=stalled" data-provider-name="VOE" data-language-id="1"></button>' +
     '<button data-play-url="/r?t=working" data-provider-name="Vidmoly" data-language-id="1"></button>' :
     '#EXTM3U\n#EXTINF:10,\nsegment.ts'});
-  ctx.networkFetch = async url => {
+  ctx.networkFetch = async (url, options) => {
     visited.push(url);
-    if(url.includes("stalled"))return new Promise(()=>{});
+    if(url.includes("stalled") || (options.clickSelectors || []).some(value => value.includes('data-provider-name="VOE"')))return new Promise(()=>{});
     return {success:true,requests:["https://media.example/video.m3u8"],html:""};
   };
   const result = JSON.parse(await ctx.extractStreamUrl(episode));
   assert.equal(result.streams[0].streamUrl,"https://media.example/video.m3u8");
   assert.equal(visited.length,2);
+  assert.ok(visited.every(url => url === episode));
   assert.equal(result.blockedReason,undefined);
 });
 function instance() {
@@ -241,6 +242,36 @@ test("SerienStream v2 provider buttons recognise German language id", () => {
   const hosts = context.stoHosters(html);
   assert.equal(hosts.length, 1);
   assert.match(hosts[0].url, /^https:\/\/serienstream\.to\/r\?/);
+  assert.equal(hosts[0].selector,'[data-provider-name="VOE"][data-language-id="1"]');
+});
+
+test("series playback uses the episode browser session and iframe referer", async () => {
+  const ctx=seriesInstance(),episode="https://serienstream.to/serie/dexter/staffel-1/episode-1",visited=[];
+  ctx.__requestText=async()=>'<button data-play-url="/r?t=session-bound" data-provider-name="VOE" data-language-id="1"></button>';
+  ctx.networkFetch=async(url,options)=>{
+    visited.push(url);
+    assert.equal(url,episode);
+    assert.ok(options.clickSelectors.includes('[data-provider-name="VOE"][data-language-id="1"]'));
+    return {success:true,url:episode,mediaPageURL:"https://rotated-player.example/e/123",requests:["https://cdn.example/video.m3u8"],html:""};
+  };
+  ctx.fetchv2=async(url,headers)=>{
+    assert.equal(headers.Referer,"https://rotated-player.example/");
+    return {status:200,text:async()=>"#EXTM3U\n#EXTINF:600,\nsegment.ts"};
+  };
+  const result=JSON.parse(await ctx.extractStreamUrl(episode,{languagePriority:0}));
+  assert.equal(result.streams[0].audioLanguage,"de");
+  assert.equal(result.streams[0].headers.Referer,"https://rotated-player.example/");
+  assert.deepEqual(visited,[episode]);
+});
+
+test("native url alias is accepted as the final player address", () => {
+  const ctx=seriesInstance();
+  assert.equal(ctx.stoProvider({url:"https://rotated-player.example/e/123",requests:[]},"VOE"),"https://rotated-player.example/e/123");
+});
+
+test("missing poster does not turn the website homepage into an image request", () => {
+  const ctx=instance();
+  assert.equal(ctx.__unifiedCatalogRows('<a href="/serie/dexter"><h3>Dexter</h3></a>',"series")[0].image,"");
 });
 
 test("blocked catalogue cannot hold another catalogue's results hostage", async () => {

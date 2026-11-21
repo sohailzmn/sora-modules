@@ -520,7 +520,7 @@ async function __awCapture(provider) {
   });
   if(!result||result.success===false){__awLog(provider.title+" web player failed");return null}
   var requests=Array.isArray(result.requests)?result.requests:[];
-  var page=__awPublic(result.originalUrl)?result.originalUrl:provider.url;
+  var page=__awPublic(result.mediaPageURL||result.originalUrl||result.url)?result.mediaPageURL||result.originalUrl||result.url:provider.url;
   for(var j=0;j<requests.length;j++){
     var link=typeof requests[j]==="string"?requests[j]:requests[j]&&(requests[j].url||requests[j].requestUrl);
     if(page===provider.url&&link&&__awPublic(link)&&!/^https:\/\/aniworld\.(?:to|cc)\//i.test(link)&&
