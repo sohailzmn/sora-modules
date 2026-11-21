@@ -1,4 +1,4 @@
-/* Shirox Unified German v1.0.1
+/* Shirox Unified German v1.0.2
  * Two isolated provider runtimes. No shared globals between their parsers.
  * Bundled source code (not remote eval). Fetches use Shirox's existing
  * fetchv2/networkFetch bridges. No AniBridge server or API key required.
@@ -1080,6 +1080,35 @@ var __UNIFIED_SOURCES=[
   {id:"aniworld",base:"https://aniworld.to",api:__UNIFIED_ANIWORLD},
   {id:"serienstream",base:"https://serienstream.to",api:__UNIFIED_SERIENSTREAM}
 ];
+/* All source requests are bounded. A blocked / unresponsive S.to response must
+ * not prevent AniWorld results from rendering in the app. Timers are provided
+ * by Shirox's native JSContext bridge, not by a remote service. */
+var __UNIFIED_SEARCH_TIMEOUT_MS = 7500;
+var __UNIFIED_EPISODES_TIMEOUT_MS = 22000;
+var __UNIFIED_STREAMS_TIMEOUT_MS = 32000;
+function __unifiedWithin(promise, timeoutMs, fallback, operation) {
+  return new Promise(function(resolve) {
+    var settled = false;
+    var timer = setTimeout(function() {
+      if (settled) return;
+      settled = true;
+      if (typeof console !== "undefined") console.warn("[Unified GER] " + operation + " timed out");
+      resolve(fallback);
+    }, timeoutMs);
+    Promise.resolve(promise).then(function(value) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    }, function(error) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (typeof console !== "undefined") console.warn("[Unified GER] " + operation + ": " + String(error));
+      resolve(fallback);
+    });
+  });
+}
 function __unifiedProvider(url){
   var value=String(url||"").toLowerCase();
   if(/^https?:\/\/(?:www\.)?aniworld\.to(?:\/|$)/.test(value))return __UNIFIED_SOURCES[0];
@@ -1100,7 +1129,10 @@ function __unifiedAbsolute(source,href){
 async function searchResults(keyword){
   var batch=await Promise.all(__UNIFIED_SOURCES.map(async function(source){
     try{
-      var raw=await source.api.searchResults(keyword);
+      var raw=await __unifiedWithin(
+        source.api.searchResults(keyword), __UNIFIED_SEARCH_TIMEOUT_MS,
+        "[]", source.id + " search"
+      );
       var rows=typeof raw==="string"?JSON.parse(raw):raw;
       return Array.isArray(rows)?rows.map(function(row){
         var href=__unifiedAbsolute(source,row&&row.href);
@@ -1129,14 +1161,20 @@ async function extractDetails(url){
 async function extractEpisodes(url){
   var source=__unifiedProvider(url);
   if(!source)return "[]";
-  try{return __unifiedJSON(await source.api.extractEpisodes(url),[])}
+  try{return __unifiedJSON(await __unifiedWithin(
+    source.api.extractEpisodes(url), __UNIFIED_EPISODES_TIMEOUT_MS,
+    "[]", source.id + " episodes"
+  ),[])}
   catch(e){if(typeof console!=="undefined")console.warn("[Unified GER] episodes: "+String(e));return "[]"}
 }
 async function extractStreamUrl(url){
   var source=__unifiedProvider(url);
   if(!source)return JSON.stringify({streams:[],subtitles:[]});
   try{
-    var value=await source.api.extractStreamUrl(url);
+    var value=await __unifiedWithin(
+      source.api.extractStreamUrl(url), __UNIFIED_STREAMS_TIMEOUT_MS,
+      JSON.stringify({streams:[],subtitles:[]}), source.id + " streams"
+    );
     var data=typeof value==="string"?JSON.parse(value):value;
     if(!data||!Array.isArray(data.streams))return JSON.stringify({streams:[],subtitles:[]});
     var seen={},streams=[];
