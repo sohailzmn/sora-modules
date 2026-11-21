@@ -3,8 +3,8 @@
   "author": {
     "name": "Sohailzm"
   },
-  "version": "1.1.2",
-  "language": "German (DUB)",
+  "version": "2.0.0",
+  "language": "Deutsch bevorzugt, DE/EN Untertitel",
   "type": "anime",
   "streamType": "HLS/MP4",
   "baseUrl": "https://aniworld.to",
@@ -13,5 +13,5 @@
   "asyncJS": true,
   "streamAsyncJS": true,
   "multiStream": true,
-  "softsub": false
+  "softsub": true
 }

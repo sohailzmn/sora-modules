@@ -1,4 +1,67 @@
-/* Shirox Unified German v1.1.2
+// __SHIROX_LANGUAGE_CONTRACT_V2: per-episode language-aware resolver.
+function __shiroxAttr(tag,key){
+ var m=String(tag||"").match(new RegExp("(?:^|\\s)"+key+"\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)')","i"));
+ return m?(m[1]===undefined?m[2]:m[1]):"";
+}
+function __shiroxLanguage(label){
+ var s=String(label||"").toLowerCase(),sub=/sub|untertitel/.test(s),de=/deutsch|german|\bger\b/.test(s),en=/english|englisch|\beng\b/.test(s);
+ if(!s)return null;
+ return {audioLanguage:de&&!sub?"de":en&&!sub?"en":"und",
+         subtitleLanguage:sub?(de?"de":en?"en":null):null,
+         isHardsub:sub&&(de||en),languagePriority:de&&!sub?0:de&&sub?1:en&&sub?2:3};
+}
+function __shiroxAbsolute(value,base){
+ value=String(value||"").replace(/&amp;/g,"&");
+ if(/^https?:\/\//i.test(value))return value;
+ if(value.indexOf("//")===0)return "https:"+value;
+ if(!value||/^[a-z][\w+.-]*:/i.test(value))return "";
+ var origin=(String(base).match(/^https?:\/\/[^/]+/i)||[])[0];if(!origin)return "";
+ return value.charAt(0)==="/"?origin+value:String(base).split(/[?#]/)[0].replace(/[^/]*$/,"")+value;
+}
+function __shiroxTracks(html,page){
+ var tags=String(html||"").match(/<track\b[^>]*>/gi)||[],out=[];
+ tags.forEach(function(tag){
+  var lang=__shiroxAttr(tag,"srclang"),label=__shiroxAttr(tag,"label"),src=__shiroxAbsolute(__shiroxAttr(tag,"src"),page);
+  if(src&&/^(?:de|deu|ger|en|eng)(?:-|$)/i.test(lang))out.push({title:label||lang,url:src,lang:lang,headers:{Referer:page}});
+ });
+ return out;
+}
+function __shiroxDecorate(stream,hoster,html,page){
+ var out=Object.assign({},stream),metadata=hoster.language||{};
+ out.audioLanguage=metadata.audioLanguage||"und";
+ out.subtitleLanguage=metadata.subtitleLanguage||undefined;
+ out.isHardsub=metadata.isHardsub===true;
+ out.allSubtitles=__shiroxTracks(html,page);
+ return out;
+}
+function __shiroxStreamPriority(stream){
+ if(stream.audioLanguage==="de")return 0;
+ var languages=(stream.allSubtitles||[]).map(function(t){return t.lang});
+ if(stream.isHardsub&&stream.subtitleLanguage==="de"||languages.some(function(l){return /^(de|deu|ger)(-|$)/i.test(l)}))return 1;
+ if(stream.isHardsub&&stream.subtitleLanguage==="en"||languages.some(function(l){return /^(en|eng)(-|$)/i.test(l)}))return 2;
+ return 3;
+}
+async function __shiroxResolveLanguage(hosters,capture,options){
+ var specified=options&&typeof options.languagePriority==="number",first=specified?options.languagePriority:0,last=specified?first:2;
+ for(var priority=first;priority<=last;priority++){
+  var candidates=hosters.filter(function(h){var l=h.language||{};return l.languagePriority===priority||(priority>0&&l.languagePriority===3)}).slice(0,3);
+  if(!candidates.length)continue;
+  var streams=await new Promise(function(resolve){
+   var done=false,pending=candidates.length,out=[],seen={},grace,timer=setTimeout(finish,8000);
+   function finish(){if(done)return;done=true;clearTimeout(timer);if(grace)clearTimeout(grace);resolve(out)}
+   candidates.forEach(function(h){Promise.resolve().then(function(){return capture(h)}).then(function(value){
+    if(done)return;
+    var values=Array.isArray(value)?value:[value];
+    values.forEach(function(s){if(s&&s.streamUrl&&__shiroxStreamPriority(s)===priority&&!seen[s.streamUrl]){seen[s.streamUrl]=true;out.push(s)}});
+    if(out.length>=2)finish();else if(out.length&&!grace)grace=setTimeout(finish,500);
+   },function(){}).then(function(){if(--pending===0)finish()})});
+  });
+  if(streams.length)return streams;
+ }
+ return [];
+}
+
+/* Shirox Unified German v2.0.0
  * Two isolated provider runtimes. No shared globals between their parsers.
  * Bundled source code (not remote eval). Fetches use Shirox's existing
  * fetchv2/networkFetch bridges. No AniBridge server or API key required.
@@ -280,14 +343,14 @@ function __awHosters(html) {
     var li = list[j], open = (li.match(/^<li\b[^>]*>/i) || [""])[0];
     var langKey = __awAttr(open, "data-lang-key");
     var language = flags[langKey] || (langKey === "1" ? "Deutsch" : "");
-    if (!/(deutsch|german|ger dub)/i.test(language) || /(untertitel|sub)/i.test(language)) continue;
+    var languageMetadata=__shiroxLanguage(language); if(!languageMetadata)continue;
     var link = (li.match(/<a\b[^>]*href\s*=\s*["']([^"']+)["']/i) || [])[1];
     var url = __awAbsolute(link, BASE_URL + "/");
     if (!url || !/^https:\/\/aniworld\.to\/redirect\//i.test(url) || seen[url]) continue;
     seen[url] = true;
     var hoster = (li.match(/<h4\b[^>]*>([\s\S]*?)<\/h4>/i) || [])[1] || "Video";
     hoster = hoster.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim();
-    out.push({ url: url, title: hoster });
+    out.push({ url: url, title: hoster, language:languageMetadata });
   }
   // Keep compatibility with v2 episode layouts using provider buttons.
   // Respect the published German audio language and same-origin redirect.
@@ -295,11 +358,11 @@ function __awHosters(html) {
   for (var b = 0; b < buttons.length; b++) {
     var tag = buttons[b], language = __awAttr(tag, "data-language-label") ||
       (__awAttr(tag, "data-language-id") === "1" ? "Deutsch" : "");
-    if (!/(deutsch|german|ger dub)/i.test(language) || /(untertitel|sub)/i.test(language)) continue;
+    var languageMetadata=__shiroxLanguage(language); if(!languageMetadata)continue;
     var buttonURL = __awAbsolute(__awAttr(tag, "data-play-url"), BASE_URL + "/");
     if (!/^https:\/\/aniworld\.to\/(?:redirect\/|r\?)/i.test(buttonURL) || seen[buttonURL]) continue;
     seen[buttonURL] = true;
-    out.push({url:buttonURL,title:__awAttr(tag,"data-provider-name") || "Video"});
+    out.push({url:buttonURL,title:__awAttr(tag,"data-provider-name") || "Video",language:languageMetadata});
   }
   var order = { voe: 0, vidmoly: 1, filemoon: 2, loadx: 3, luluvdo: 4 };
   out.sort(function(a,b) {
@@ -453,13 +516,13 @@ async function __awCapture(provider) {
   __awLog(provider.title+": "+urls.length+" player media candidates");
   for(var k=0;k<Math.min(3,urls.length);k++){
     var checked=await __awVerify(urls[k],page);
-    if(checked)return await __awQualityOptions(checked,page,provider.title);
+    if(checked){var choices=await __awQualityOptions(checked,page,provider.title);return choices.map(function(s){return __shiroxDecorate(s,provider,result.html,page)})}
   }
   return null;
 }
 
 
-async function extractStreamUrl(url){
+async function extractStreamUrl(url,options){
   try{
     var html=await __requestText(url,{headers:{Accept:"text/html,application/xhtml+xml",Referer:BASE_URL+"/"}});
     if(!html){__awLog("episode page is empty");return JSON.stringify({streams:[],subtitles:[]})}
@@ -472,22 +535,7 @@ async function extractStreamUrl(url){
     var hosters=__awHosters(html);
     __awLog("German hosters: "+hosters.map(function(x){return x.title}).join(", "));
     if(typeof networkFetch!=="function")__awLog("browser fetch is unavailable");
-    // Retain mirrors: if the first CDN expires mid-playback, Shirox can
-    // select another resolved host without refetching the same dead URL.
-    var streams=[], seen={};
-    for(var i=0;i<Math.min(3,hosters.length);i++){
-      try{
-        var result=await __awCapture(hosters[i]);
-        if(!Array.isArray(result))continue;
-        for(var j=0;j<result.length;j++){
-          var candidate=result[j],key=candidate&&(candidate.streamUrl||candidate.url);
-          if(!key||seen[key])continue;
-          seen[key]=true;
-          streams.push(candidate);
-        }
-        if(streams.length>=3)break;
-      }catch(e){__awLog(hosters[i].title+" failed: "+String(e).slice(0,120))}
-    }
+    var streams=await __shiroxResolveLanguage(hosters,__awCapture,options);
     if(streams.length)return JSON.stringify({streams:streams,subtitles:[]});
     __awLog("No working stream from checked German hosters");
   }catch(e){__awLog("stream lookup failed: "+String(e).slice(0,140))}
@@ -1078,10 +1126,10 @@ function stoGerman(label){
 }
 function stoHosters(html){
  html=String(html||"");var out=[],seen={},add=function(href,provider,lang){
-  if(!stoGerman(lang))return;
+  var languageMetadata=__shiroxLanguage(lang);if(!languageMetadata)return;
   var url=stoCanon(__awAbsolute(href,BASE_URL+"/"));
   if(!url||!/^https?:\/\/serienstream\.to\//i.test(url)||seen[url])return;
-  seen[url]=true;out.push({url:url,title:stoClean(provider)||"Hoster"});
+  seen[url]=true;out.push({url:url,title:stoClean(provider)||"Hoster",language:languageMetadata});
  };
  var tags=html.match(/<[^>]*data-play-url\s*=\s*["'][^"']+["'][^>]*>/gi)||[];
  for(var i=0;i<tags.length;i++){
@@ -1131,7 +1179,7 @@ async function stoCapture(h,episode){
   __awLog(h.title+": "+urls.length+" candidate URLs");
   for(var j=0;j<Math.min(urls.length,4);j++){
    var verified=await __awVerify(urls[j],c.base);
-   if(verified)return {title:h.title+" · GER DUB",streamUrl:verified.streamUrl,headers:verified.headers};
+   if(verified)return __shiroxDecorate({title:h.title,streamUrl:verified.streamUrl,headers:verified.headers},h,c.data.html,c.base);
   }
  }
  return blocked?{blockedReason:"website_verification_required"}:null;
@@ -1175,7 +1223,7 @@ function stoResolveHosters(hosters, episode, budgetMs, graceMs) {
     });
   });
 }
-async function extractStreamUrl(url){
+async function extractStreamUrl(url,options){
   stoVerificationRequired=false;
   try{
     var episode=stoCanon(url);
@@ -1188,7 +1236,7 @@ async function extractStreamUrl(url){
     }
     var hosters=stoHosters(html);
     __awLog("German hosters: "+hosters.length);
-    var streams=await stoResolveHosters(hosters,episode);
+    var streams=await __shiroxResolveLanguage(hosters,function(h){return stoCapture(h,episode)},options);
     if(streams.length)return JSON.stringify({streams:streams,subtitles:[]});
   }catch(e){__awLog("Stream load failed: "+String(e).slice(0,145))}
   return JSON.stringify({streams:[],subtitles:[],blockedReason:(streams&&streams.blockedReason)||(stoVerificationRequired?"website_verification_required":undefined)});
@@ -1327,12 +1375,12 @@ async function extractEpisodes(url){
   ),[])}
   catch(e){if(typeof console!=="undefined")console.warn("[Unified GER] episodes: "+String(e));return "[]"}
 }
-async function extractStreamUrl(url){
+async function extractStreamUrl(url,options){
   var source=__unifiedProvider(url);
   if(!source)return JSON.stringify({streams:[],subtitles:[]});
   try{
     var value=await __unifiedWithin(
-      source.api.extractStreamUrl(url), __UNIFIED_STREAMS_TIMEOUT_MS,
+      source.api.extractStreamUrl(url,options), __UNIFIED_STREAMS_TIMEOUT_MS,
       JSON.stringify({streams:[],subtitles:[]}), source.id + " streams"
     );
     var data=typeof value==="string"?JSON.parse(value):value;

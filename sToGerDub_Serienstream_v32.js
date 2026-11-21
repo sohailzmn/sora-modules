@@ -1,3 +1,66 @@
+// __SHIROX_LANGUAGE_CONTRACT_V2: per-episode language-aware resolver.
+function __shiroxAttr(tag,key){
+ var m=String(tag||"").match(new RegExp("(?:^|\\s)"+key+"\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)')","i"));
+ return m?(m[1]===undefined?m[2]:m[1]):"";
+}
+function __shiroxLanguage(label){
+ var s=String(label||"").toLowerCase(),sub=/sub|untertitel/.test(s),de=/deutsch|german|\bger\b/.test(s),en=/english|englisch|\beng\b/.test(s);
+ if(!s)return null;
+ return {audioLanguage:de&&!sub?"de":en&&!sub?"en":"und",
+         subtitleLanguage:sub?(de?"de":en?"en":null):null,
+         isHardsub:sub&&(de||en),languagePriority:de&&!sub?0:de&&sub?1:en&&sub?2:3};
+}
+function __shiroxAbsolute(value,base){
+ value=String(value||"").replace(/&amp;/g,"&");
+ if(/^https?:\/\//i.test(value))return value;
+ if(value.indexOf("//")===0)return "https:"+value;
+ if(!value||/^[a-z][\w+.-]*:/i.test(value))return "";
+ var origin=(String(base).match(/^https?:\/\/[^/]+/i)||[])[0];if(!origin)return "";
+ return value.charAt(0)==="/"?origin+value:String(base).split(/[?#]/)[0].replace(/[^/]*$/,"")+value;
+}
+function __shiroxTracks(html,page){
+ var tags=String(html||"").match(/<track\b[^>]*>/gi)||[],out=[];
+ tags.forEach(function(tag){
+  var lang=__shiroxAttr(tag,"srclang"),label=__shiroxAttr(tag,"label"),src=__shiroxAbsolute(__shiroxAttr(tag,"src"),page);
+  if(src&&/^(?:de|deu|ger|en|eng)(?:-|$)/i.test(lang))out.push({title:label||lang,url:src,lang:lang,headers:{Referer:page}});
+ });
+ return out;
+}
+function __shiroxDecorate(stream,hoster,html,page){
+ var out=Object.assign({},stream),metadata=hoster.language||{};
+ out.audioLanguage=metadata.audioLanguage||"und";
+ out.subtitleLanguage=metadata.subtitleLanguage||undefined;
+ out.isHardsub=metadata.isHardsub===true;
+ out.allSubtitles=__shiroxTracks(html,page);
+ return out;
+}
+function __shiroxStreamPriority(stream){
+ if(stream.audioLanguage==="de")return 0;
+ var languages=(stream.allSubtitles||[]).map(function(t){return t.lang});
+ if(stream.isHardsub&&stream.subtitleLanguage==="de"||languages.some(function(l){return /^(de|deu|ger)(-|$)/i.test(l)}))return 1;
+ if(stream.isHardsub&&stream.subtitleLanguage==="en"||languages.some(function(l){return /^(en|eng)(-|$)/i.test(l)}))return 2;
+ return 3;
+}
+async function __shiroxResolveLanguage(hosters,capture,options){
+ var specified=options&&typeof options.languagePriority==="number",first=specified?options.languagePriority:0,last=specified?first:2;
+ for(var priority=first;priority<=last;priority++){
+  var candidates=hosters.filter(function(h){var l=h.language||{};return l.languagePriority===priority||(priority>0&&l.languagePriority===3)}).slice(0,3);
+  if(!candidates.length)continue;
+  var streams=await new Promise(function(resolve){
+   var done=false,pending=candidates.length,out=[],seen={},grace,timer=setTimeout(finish,8000);
+   function finish(){if(done)return;done=true;clearTimeout(timer);if(grace)clearTimeout(grace);resolve(out)}
+   candidates.forEach(function(h){Promise.resolve().then(function(){return capture(h)}).then(function(value){
+    if(done)return;
+    var values=Array.isArray(value)?value:[value];
+    values.forEach(function(s){if(s&&s.streamUrl&&__shiroxStreamPriority(s)===priority&&!seen[s.streamUrl]){seen[s.streamUrl]=true;out.push(s)}});
+    if(out.length>=2)finish();else if(out.length&&!grace)grace=setTimeout(finish,500);
+   },function(){}).then(function(){if(--pending===0)finish()})});
+  });
+  if(streams.length)return streams;
+ }
+ return [];
+}
+
 /*
  * s.to (GER DUB) 1.11.0
  * Self-contained Sora/Shirox module: no remote source evaluation, credentials or placeholder streams.
@@ -579,10 +642,10 @@ function stoGerman(label){
 }
 function stoHosters(html){
  html=String(html||"");var out=[],seen={},add=function(href,provider,lang){
-  if(!stoGerman(lang))return;
+  var languageMetadata=__shiroxLanguage(lang);if(!languageMetadata)return;
   var url=stoCanon(__awAbsolute(href,BASE_URL+"/"));
   if(!url||!/^https?:\/\/serienstream\.to\//i.test(url)||seen[url])return;
-  seen[url]=true;out.push({url:url,title:stoClean(provider)||"Hoster"});
+  seen[url]=true;out.push({url:url,title:stoClean(provider)||"Hoster",language:languageMetadata});
  };
  var tags=html.match(/<[^>]*data-play-url\s*=\s*["'][^"']+["'][^>]*>/gi)||[];
  for(var i=0;i<tags.length;i++){
@@ -632,7 +695,7 @@ async function stoCapture(h,episode){
   __awLog(h.title+": "+urls.length+" candidate URLs");
   for(var j=0;j<Math.min(urls.length,4);j++){
    var verified=await __awVerify(urls[j],c.base);
-   if(verified)return {title:h.title+" · GER DUB",streamUrl:verified.streamUrl,headers:verified.headers};
+   if(verified)return __shiroxDecorate({title:h.title,streamUrl:verified.streamUrl,headers:verified.headers},h,c.data.html,c.base);
   }
  }
  return blocked?{blockedReason:"website_verification_required"}:null;
@@ -676,7 +739,7 @@ function stoResolveHosters(hosters, episode, budgetMs, graceMs) {
     });
   });
 }
-async function extractStreamUrl(url){
+async function extractStreamUrl(url,options){
   stoVerificationRequired=false;
   try{
     var episode=stoCanon(url);
@@ -689,7 +752,7 @@ async function extractStreamUrl(url){
     }
     var hosters=stoHosters(html);
     __awLog("German hosters: "+hosters.length);
-    var streams=await stoResolveHosters(hosters,episode);
+    var streams=await __shiroxResolveLanguage(hosters,function(h){return stoCapture(h,episode)},options);
     if(streams.length)return JSON.stringify({streams:streams,subtitles:[]});
   }catch(e){__awLog("Stream load failed: "+String(e).slice(0,145))}
   return JSON.stringify({streams:[],subtitles:[],blockedReason:(streams&&streams.blockedReason)||(stoVerificationRequired?"website_verification_required":undefined)});
