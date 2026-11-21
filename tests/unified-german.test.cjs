@@ -252,3 +252,48 @@ test("ordinary empty stream result is not mislabeled as a website challenge", as
   ));
   assert.equal(result.blockedReason, undefined);
 });
+
+test("language contract distinguishes dubbing from German and English subtitles", () => {
+  const ctx=instance();
+  assert.equal(ctx.__shiroxLanguage("Deutsch").audioLanguage,"de");
+  assert.equal(ctx.__shiroxLanguage("Deutsch Untertitel").languagePriority,1);
+  assert.equal(ctx.__shiroxLanguage("English Sub").languagePriority,2);
+  assert.equal(ctx.__shiroxLanguage("English").audioLanguage,"en");
+  assert.equal(ctx.__shiroxLanguage(""),null);
+});
+
+test("German subtitle hosters are retained with their real language metadata",()=>{
+ const ctx=seriesInstance();
+ const hosters=ctx.stoHosters('<button data-play-url="/r?t=sub" data-provider-name="VOE" data-language-label="Deutsch Sub"></button>');
+ assert.equal(hosters.length,1);
+ assert.equal(hosters[0].language.audioLanguage,"und");
+ assert.equal(hosters[0].language.subtitleLanguage,"de");
+ assert.equal(hosters[0].language.isHardsub,true);
+});
+
+test("soft subtitle URLs and language labels are extracted from real player tracks",()=>{
+ const ctx=instance();
+ const tracks=ctx.__shiroxTracks('<track kind="subtitles" srclang="de" label="Deutsch" src="/subs/de.vtt">'+
+   '<track kind="subtitles" srclang="en" label="English" src="/subs/en.vtt">',"https://player.example/embed/123");
+ assert.equal(tracks.length,2);
+ assert.equal(tracks[0].url,"https://player.example/subs/de.vtt");
+ assert.equal(tracks[0].lang,"de");
+});
+
+test("each language stage only returns candidates matching that stage",async()=>{
+ const ctx=instance();
+ const hosters=[{language:ctx.__shiroxLanguage("Deutsch")},{language:ctx.__shiroxLanguage("Deutsch Sub")},{language:ctx.__shiroxLanguage("English Sub")}];
+ const capture=async h=>({streamUrl:"https://media.example/"+h.language.languagePriority+".m3u8",...h.language});
+ for(let priority=0;priority<3;priority++){
+  const results=await ctx.__shiroxResolveLanguage(hosters,capture,{languagePriority:priority});
+  assert.equal(results.length,1);
+  assert.match(results[0].streamUrl,new RegExp(priority+"\\.m3u8$"));
+ }
+});
+
+test("English remains eligible when a hoster exposes both German and English soft subtitles",async()=>{
+ const ctx=instance();
+ const hosters=[{language:ctx.__shiroxLanguage("English")}];
+ const capture=async()=>({streamUrl:"https://media.example/v.m3u8",audioLanguage:"en",allSubtitles:[{lang:"de"},{lang:"en"}]});
+ assert.equal((await ctx.__shiroxResolveLanguage(hosters,capture,{languagePriority:2})).length,1);
+});

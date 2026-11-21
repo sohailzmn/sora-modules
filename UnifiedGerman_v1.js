@@ -52,7 +52,7 @@ async function __shiroxResolveLanguage(hosters,capture,options){
    candidates.forEach(function(h){Promise.resolve().then(function(){return capture(h)}).then(function(value){
     if(done)return;
     var values=Array.isArray(value)?value:[value];
-    values.forEach(function(s){if(s&&s.streamUrl&&__shiroxStreamPriority(s)===priority&&!seen[s.streamUrl]){seen[s.streamUrl]=true;out.push(s)}});
+    values.forEach(function(s){if(s&&s.streamUrl&&(priority===0?s.audioLanguage==="de":s.audioLanguage!=="de"&&(s.isHardsub&&s.subtitleLanguage===(priority===1?"de":"en")||(s.allSubtitles||[]).some(function(t){return priority===1?/^(de|deu|ger)(-|$)/i.test(t.lang):/^(en|eng)(-|$)/i.test(t.lang)})))&&!seen[s.streamUrl]){seen[s.streamUrl]=true;out.push(s)}});
     if(out.length>=2)finish();else if(out.length&&!grace)grace=setTimeout(finish,500);
    },function(){}).then(function(){if(--pending===0)finish()})});
   });
