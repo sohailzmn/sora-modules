@@ -500,7 +500,7 @@ async function searchResults(keyword){
   append(await stoSearchWithin(stoFastPageSearch(broad),2200,[]));
  }
  // Last resort: one passive WebKit search; never automate verification.
- if(!all.length&&!stoVerificationRequired&&typeof networkFetch==="function"){
+ if(!all.length&&typeof networkFetch==="function"){
   var rendered=await stoSearchWithin(stoBrowserPage(
    BASE_URL+"/suche?q="+encodeURIComponent(queries[queries.length-1])
   ),9000,"");

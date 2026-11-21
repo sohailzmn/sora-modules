@@ -148,6 +148,16 @@ test("SerienStream browser search survives its eight-second capture", async () =
   const rows=JSON.parse(await unifiedSearch("Dexter",{kind:"series"}));
   assert.equal(rows[0].title,"Dexter");
 });
+
+test("a rejected HTTP request still allows a passive normal browser load", async () => {
+  const ctx=seriesInstance();let browserCalls=0;
+  ctx.stoFastExact=async()=>{ctx.stoVerificationRequired=true;return null;};
+  ctx.stoFastPageSearch=async()=>[];
+  ctx.stoBrowserPage=async()=>{browserCalls++;return '<a href="/serie/dexter"><h3>Dexter</h3></a>';};
+  ctx.stoHtmlSearch=()=>[{title:"Dexter",image:"",href:"https://serienstream.to/serie/dexter"}];
+  assert.equal(JSON.parse(await ctx.searchResults("Dexter"))[0].title,"Dexter");
+  assert.equal(browserCalls,1);
+});
 test("all bundled JavaScript parses in the module runtime", () => {
   assert.ok(instance().__UNIFIED_SOURCES.length === 2);
 });
