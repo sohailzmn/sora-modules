@@ -340,6 +340,9 @@ function stoCandidateQueries(keyword){
  return variants.slice(0,4);
 }
 function stoSearchWithin(promise,timeoutMs,fallback){
+ // Node VM regression runners may not install timer globals; the real Shirox
+ // JSContext does. Keep both environments compatible.
+ if(typeof setTimeout!=="function")return Promise.resolve(promise).catch(function(){return fallback});
  return new Promise(function(resolve){
   var finished=false,timer=setTimeout(function(){if(finished)return;finished=true;resolve(fallback)},timeoutMs);
   Promise.resolve(promise).then(function(value){if(finished)return;finished=true;clearTimeout(timer);resolve(value)},
@@ -351,12 +354,16 @@ async function stoFastExact(keyword){
  var href=BASE_URL+"/serie/"+slug;
  try{
   var html=await __requestText(href,{strictStatus:true,headers:{Accept:"text/html",Referer:BASE_URL+"/"}});
-  if(!html||stoIsSecurityPage(html)||stoIsUnavailablePage(html))return null;
+  if(!html||stoIsUnavailablePage(html))return null;
+  if(stoIsSecurityPage(html)){stoVerificationRequired=true;return null}
   var title=stoActualTitle(html);
   if(stoNormalizeTitle(title)!==stoNormalizeTitle(keyword))return null;
   if(!/(?:\/staffel-\d+|\/episode-\d+|<h1\b|og:title)/i.test(html))return null;
   return {title:title,href:href,image:stoImage(html,title)};
- }catch(e){return null}
+ }catch(e){
+  if(!stoSearchProblem)stoSearchProblem="SerienStream ist nicht erreichbar ("+String(e.message||e).slice(0,90)+").";
+  return null;
+ }
 }
 async function stoFastPageSearch(keyword){
  var url=BASE_URL+"/suche?q="+encodeURIComponent(keyword);
@@ -364,13 +371,21 @@ async function stoFastPageSearch(keyword){
   var html=await __requestText(url,{strictStatus:true,headers:{Accept:"text/html",Referer:BASE_URL+"/"}});
   if(stoIsSecurityPage(html)){stoVerificationRequired=true;return []}
   if(!html||stoIsUnavailablePage(html))return [];
-  return stoHtmlSearch(html,keyword);
- }catch(e){return []}
+  if(stoExplicitlyEmptySearch(html))stoSearchPageSucceeded=true;
+  var results=stoHtmlSearch(html,keyword);
+  if(results.length)stoSearchPageSucceeded=true;
+  return results;
+ }catch(e){
+  if(!stoSearchProblem)stoSearchProblem="SerienStream ist nicht erreichbar ("+String(e.message||e).slice(0,90)+").";
+  return [];
+ }
 }
 async function searchResults(keyword){
  keyword=stoClean(keyword);
  if(!keyword)return "[]";
  stoVerificationRequired=false;
+ stoSearchPageSucceeded=false;
+ stoSearchProblem="";
  var queries=stoCandidateQueries(keyword),all=[],seen={};
  function append(items){
   if(!Array.isArray(items))return;
@@ -401,7 +416,13 @@ async function searchResults(keyword){
   if(!stoIsSecurityPage(rendered))
    append(stoHtmlSearch(rendered,queries[queries.length-1]));
  }
- // A blocked lookup is not evidence that no episodes exist.
+ // A blocked lookup is not evidence that no episodes exist. Make site
+ // verification and generic HTML shells visible rather than reporting a
+ // genuine, empty series catalogue.
+ if(!all.length&&stoVerificationRequired)
+  throw new Error("SerienStream benötigt eine Bestätigung im Browser.");
+ if(!all.length&&!stoSearchPageSucceeded)
+  throw new Error(stoSearchProblem||"SerienStream lieferte keine verwertbaren Suchdaten.");
  var q=stoNormalizeTitle(keyword);
  all.sort(function(a,b){
   var aName=stoNormalizeTitle(a.title),bName=stoNormalizeTitle(b.title);
