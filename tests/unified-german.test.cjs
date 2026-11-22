@@ -295,6 +295,7 @@ test("series playback uses the episode browser session and iframe referer", asyn
     visited.push(url);
     assert.equal(url,episode);
     assert.ok(options.clickSelectors.includes('[data-provider-name="VOE"][data-language-id="1"]'));
+    assert.equal(options.cutoff,null,'source gate must not stop at an advertising manifest');
     return {success:true,url:episode,mediaPageURL:"https://rotated-player.example/e/123",requests:["https://cdn.example/video.m3u8"],html:""};
   };
   ctx.fetchv2=async(url,headers)=>{
@@ -546,7 +547,7 @@ test("verified series iframe payload keeps its real origin through stream resolu
  const ctx=withAtob(instance()),episode='https://serienstream.to/serie/dexter/staffel-1/episode-1';
  const referers=[];
  ctx.fetchv2=async(url,headers)=>{if(url!==episode)referers.push(headers.Referer);return {status:200,text:async()=>url===episode?'<button data-play-url="/r?t=opaque" data-provider-name="VOE" data-language-id="1"></button>':'#EXTM3U\n#EXTINF:1200,\nepisode.ts\n#EXT-X-ENDLIST'}};
- ctx.networkFetch=async()=>({success:true,html:'<title>Episode</title>',playerPageURL:'https://rotated-voe.example/e/abc123',playerHTML:voePayload({source:'https://media.example/master.m3u8'}),requests:[]});
+ ctx.networkFetch=async()=>({success:true,html:'<title>Episode</title>',playerPageURL:'https://rotated-voe.example/e/abc123',mediaPageURL:'https://advertising.example/frame',playerHTML:voePayload({source:'https://media.example/master.m3u8'}),requests:[]});
  const result=JSON.parse(await ctx.extractStreamUrl(episode,{languagePriority:0}));
  assert.equal(result.streams[0].streamUrl,'https://media.example/master.m3u8');
  assert.equal(result.streams[0].audioLanguage,'de');

@@ -228,7 +228,9 @@ async function __awVerify(url, page) {
       var response = typeof fetchv2 === "function"
         ? await fetchv2(url, headers, __awMediaKind(url) === "mp4" ? "HEAD" : "GET", null)
         : await fetch(url, { headers: headers, method: __awMediaKind(url) === "mp4" ? "HEAD" : "GET" });
-      if (!response || typeof response === "string" || (typeof response.status === "number" && (response.status < 200 || response.status >= 300))) continue;
+      if (!response || typeof response === "string") continue;
+      __awLog("media "+__awMediaKind(url)+" HTTP "+response.status+" origin="+__awOrigin(url)+" player="+__awOrigin(page));
+      if (typeof response.status === "number" && (response.status < 200 || response.status >= 300)) continue;
       if (__awMediaKind(url) === "hls") {
         var body = await response.text();
         if (!/^#EXTM3U(?:\r?\n|$)/.test(String(body || "").replace(/^\uFEFF/, "").trim())) continue;
@@ -720,7 +722,7 @@ function stoHosters(html){
  return out;
 }
 function stoProvider(capture,provider){
- var finalPage=capture&&(capture.mediaPageURL||capture.playerPageURL||capture.originalUrl||capture.url);
+ var finalPage=capture&&(capture.playerPageURL||capture.mediaPageURL||capture.originalUrl||capture.url);
  if(__awPublic(finalPage)&&!/^https?:\/\/(?:www\.)?(?:serienstream\.(?:to|cx)|s\.to)\//i.test(finalPage)&&!__awMediaKind(finalPage))return finalPage;
  var items=Array.isArray(capture&&capture.requests)?capture.requests.slice():[];
  if(capture&&capture.cutoffUrl)items.unshift(capture.cutoffUrl);
@@ -735,7 +737,7 @@ function stoCaptureSummary(capture){
  if(!capture)return "no browser result";
  var title=stoClean((String(capture.html||"").match(/<title[^>]*>([\s\S]*?)<\/title>/i)||[])[1]||"").slice(0,80);
  var origins=[],seen={};(capture.requests||[]).forEach(function(value){var url=typeof value==="string"?value:value&&value.url;var origin=__awOrigin(url||"");if(origin&&!seen[origin]){seen[origin]=true;origins.push(origin)}});
- return "page="+__awOrigin(capture.originalUrl||capture.url||"")+" title="+title+" verificationResponse="+(capture.verificationResponsePresent===true)+" continued="+(capture.verifiedContinuationClicked===true)+" requests="+(capture.requests||[]).length+" origins="+origins.slice(0,8).join(",");
+ return "page="+__awOrigin(capture.originalUrl||capture.url||"")+" title="+title+" verificationResponse="+(capture.verificationResponsePresent===true)+" continued="+(capture.verifiedContinuationClicked===true)+" playerPayload="+!!capture.playerHTML+" playerOrigin="+__awOrigin(capture.playerPageURL||capture.mediaPageURL||"")+" cutoff="+(capture.cutoffTriggered===true)+" requests="+(capture.requests||[]).length+" origins="+origins.slice(0,8).join(",");
 }
 async function stoCapture(h,episode){
  if(typeof networkFetch!=="function")return null;
@@ -747,7 +749,9 @@ async function stoCapture(h,episode){
  if(h.selector){
   // The site's encrypted redirect belongs to its browser session. Activate
   // the actual provider/language button in that same episode document.
-  firstURL=episode;pageOptions.timeoutSeconds=14;pageOptions.maxWaitTime=3;
+  // Advertising frames also request manifests. Wait for the actual
+  // player document instead of ending this source session at an ad URL.
+  firstURL=episode;pageOptions.cutoff=null;pageOptions.timeoutSeconds=14;pageOptions.maxWaitTime=3;
   pageOptions.waitForSelectors=[h.selector];
   pageOptions.clickSelectors=[h.selector].concat(options.clickSelectors);
  }
