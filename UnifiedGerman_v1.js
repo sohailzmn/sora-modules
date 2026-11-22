@@ -1212,7 +1212,7 @@ function stoCaptureSummary(capture){
  if(!capture)return "no browser result";
  var title=stoClean((String(capture.html||"").match(/<title[^>]*>([\s\S]*?)<\/title>/i)||[])[1]||"").slice(0,80);
  var origins=[],seen={};(capture.requests||[]).forEach(function(value){var url=typeof value==="string"?value:value&&value.url;var origin=__awOrigin(url||"");if(origin&&!seen[origin]){seen[origin]=true;origins.push(origin)}});
- return "page="+__awOrigin(capture.originalUrl||capture.url||"")+" title="+title+" verificationResponse="+(capture.verificationResponsePresent===true)+" continued="+(capture.verifiedContinuationClicked===true)+" playerPayload="+!!capture.playerHTML+" playerOrigin="+__awOrigin(capture.playerPageURL||capture.mediaPageURL||"")+" cutoff="+(capture.cutoffTriggered===true)+" requests="+(capture.requests||[]).length+" origins="+origins.slice(0,8).join(",");
+ return "page="+__awOrigin(capture.originalUrl||capture.url||"")+" title="+title+" verificationResponse="+(capture.verificationResponsePresent===true)+" continued="+(capture.verifiedContinuationClicked===true)+" activated="+(capture.verificationProviderActivated===true)+" contextMatches="+(capture.verificationContextMatches===true)+" proof="+String(capture.verificationProofState||"unknown")+" playerPayload="+!!capture.playerHTML+" playerOrigin="+__awOrigin(capture.playerPageURL||capture.mediaPageURL||"")+" cutoff="+(capture.cutoffTriggered===true)+" requests="+(capture.requests||[]).length+" origins="+origins.slice(0,8).join(",");
 }
 async function stoNativePlayerCapture(player, episode) {
  if(!__awPublic(player)||!/^\/e\/[a-z0-9]+\/?$/i.test(String(player).replace(/^https?:\/\/[^/]+/i,"").split(/[?#]/)[0]))return null;
