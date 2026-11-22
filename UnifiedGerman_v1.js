@@ -87,7 +87,7 @@ async function __shiroxResolveLanguage(hosters,capture,options){
   var candidates=hosters.filter(function(h){var l=h.language||{};return l.languagePriority===priority||(priority>0&&l.languagePriority===3)}).slice(0,12);
   if(!candidates.length)continue;
   var streams=await new Promise(function(resolve){
-   var done=false,next=0,active=0,out=[],seen={},grace,timer=setTimeout(finish,24000);
+   var done=false,next=0,active=0,out=[],seen={},grace,timer=setTimeout(finish,options&&options.sequentialCaptures?30000:24000);
    function finish(){if(done)return;done=true;clearTimeout(timer);if(grace)clearTimeout(grace);resolve(out)}
    function pump(){
     while(!done&&active<concurrency&&next<candidates.length){
@@ -701,7 +701,11 @@ async function __awVerify(url, page) {
         : await fetch(url, { headers: headers, method: __awMediaKind(url) === "mp4" ? "HEAD" : "GET" });
       if (!response || typeof response === "string") continue;
       __awLog("media "+__awMediaKind(url)+" HTTP "+response.status+" origin="+__awOrigin(url)+" player="+__awOrigin(page));
-      if (typeof response.status === "number" && (response.status < 200 || response.status >= 300)) continue;
+      if (typeof response.status === "number" && (response.status < 200 || response.status >= 300)) {
+        var denial=String(await response.text()).slice(0,2048);
+        __awLog("media denial="+(/expired/i.test(denial)?"expired":/signature/i.test(denial)?"signature":/token/i.test(denial)?"token":/\b(?:ip|asn)\b/i.test(denial)?"network-binding":/forbidden/i.test(denial)?"forbidden":"other"));
+        continue;
+      }
       if (__awMediaKind(url) === "hls") {
         var body = await response.text();
         if (!/^#EXTM3U(?:\r?\n|$)/.test(String(body || "").replace(/^\uFEFF/, "").trim())) continue;
@@ -1210,6 +1214,24 @@ function stoCaptureSummary(capture){
  var origins=[],seen={};(capture.requests||[]).forEach(function(value){var url=typeof value==="string"?value:value&&value.url;var origin=__awOrigin(url||"");if(origin&&!seen[origin]){seen[origin]=true;origins.push(origin)}});
  return "page="+__awOrigin(capture.originalUrl||capture.url||"")+" title="+title+" verificationResponse="+(capture.verificationResponsePresent===true)+" continued="+(capture.verifiedContinuationClicked===true)+" playerPayload="+!!capture.playerHTML+" playerOrigin="+__awOrigin(capture.playerPageURL||capture.mediaPageURL||"")+" cutoff="+(capture.cutoffTriggered===true)+" requests="+(capture.requests||[]).length+" origins="+origins.slice(0,8).join(",");
 }
+async function stoNativePlayerCapture(player, episode) {
+ if(!__awPublic(player)||!/^\/e\/[a-z0-9]+\/?$/i.test(String(player).replace(/^https?:\/\/[^/]+/i,"").split(/[?#]/)[0]))return null;
+ for(var hop=0;hop<2;hop++){
+  try{
+   var response=typeof fetchv2==="function"?await fetchv2(player,{Referer:__awOrigin(episode)+"/"},"GET",null):await fetch(player,{headers:{Referer:__awOrigin(episode)+"/"}});
+   __awLog("native player HTTP "+(response&&response.status)+" origin="+__awOrigin(player));
+   if(!response||Number(response.status)!==200)return null;
+   var html=String(await response.text());if(html.length>1000000)return null;
+   var finalPage=__awPublic(response.url)?response.url:player;
+   if(__shiroxVoeSources(html).length)return {html:html,playerHTML:html,playerPageURL:finalPage,requests:[]};
+   var redirect=html.match(/window\.location\.href\s*=\s*["']([^"']+)["']/);
+   var next=redirect&&__awAbsolute(redirect[1],finalPage);
+   if(!__awPublic(next)||!/^\/e\/[a-z0-9]+\/?$/i.test(String(next).replace(/^https?:\/\/[^/]+/i,"").split(/[?#]/)[0]))return null;
+   player=next;
+  }catch(e){return null}
+ }
+ return null;
+}
 async function stoCapture(h,episode){
  if(typeof networkFetch!=="function")return null;
  var options={timeoutSeconds:8,cutoff:".m3u8",returnHTML:true,returnCookies:false,maxWaitTime:2,
@@ -1231,6 +1253,10 @@ async function stoCapture(h,episode){
  if(first&&stoPlayerBlocked(first.html)&&!first.verificationResponsePresent&&!__awCandidates(first,first.mediaPageURL||first.originalUrl||first.url||firstURL).length)return {blockedReason:"website_verification_required"};
  if(!first||first.success===false)return null;
  var blocked=false,external=stoProvider(first,h.title),captures=[{data:first,base:external||h.url}];
+ // Obtain short-lived media URLs with the native client that will verify
+ // and play them, rather than reusing a token issued to WebKit's network context.
+ var nativePlayer=external&&await stoNativePlayerCapture(external,episode);
+ if(nativePlayer)captures.unshift({data:nativePlayer,base:nativePlayer.playerPageURL});
  if(external && !__awCandidates(first,external||h.url).length){
   try{
    var second=await networkFetch(external,Object.assign({},options,{headers:{Referer:BASE_URL+"/"}}));

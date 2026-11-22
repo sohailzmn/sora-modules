@@ -87,7 +87,7 @@ async function __shiroxResolveLanguage(hosters,capture,options){
   var candidates=hosters.filter(function(h){var l=h.language||{};return l.languagePriority===priority||(priority>0&&l.languagePriority===3)}).slice(0,12);
   if(!candidates.length)continue;
   var streams=await new Promise(function(resolve){
-   var done=false,next=0,active=0,out=[],seen={},grace,timer=setTimeout(finish,24000);
+   var done=false,next=0,active=0,out=[],seen={},grace,timer=setTimeout(finish,options&&options.sequentialCaptures?30000:24000);
    function finish(){if(done)return;done=true;clearTimeout(timer);if(grace)clearTimeout(grace);resolve(out)}
    function pump(){
     while(!done&&active<concurrency&&next<candidates.length){

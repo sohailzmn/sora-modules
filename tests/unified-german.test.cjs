@@ -553,3 +553,27 @@ test("verified series iframe payload keeps its real origin through stream resolu
  assert.equal(result.streams[0].audioLanguage,'de');
  assert.ok(referers.includes('https://rotated-voe.example/'));
 });
+
+test("browser-bound media links are refreshed using the native fetching client",async()=>{
+ const ctx=withAtob(instance()),episode='https://serienstream.to/serie/dexter/staffel-1/episode-1';
+ const player='https://rotated-voe.example/e/abc123',browserURL='https://media.example/browser-bound.m3u8',nativeURL='https://media.example/native-bound.m3u8';
+ const mediaRequests=[];let refreshes=0;
+ ctx.networkFetch=async()=>({success:true,html:'<title>Episode</title>',playerPageURL:player,playerHTML:voePayload({source:browserURL}),requests:[]});
+ ctx.fetchv2=async(url,headers)=>{
+  if(url===episode)return {status:200,text:async()=>'<button data-play-url="/r?t=opaque" data-provider-name="VOE" data-language-id="1"></button>'};
+  if(url===player){refreshes++;return {status:200,url:player,text:async()=>voePayload({source:nativeURL})};}
+  mediaRequests.push(url);
+  return {status:url===nativeURL?200:403,text:async()=>url===nativeURL?'#EXTM3U\n#EXTINF:1200,\nepisode.ts\n#EXT-X-ENDLIST':'Invalid network token'};
+ };
+ const result=JSON.parse(await ctx.extractStreamUrl(episode,{languagePriority:0}));
+ assert.equal(result.streams[0].streamUrl,nativeURL);assert.equal(refreshes,1);
+ assert.deepEqual(mediaRequests,[nativeURL]);
+});
+
+test("a denied native player refresh retains an otherwise valid browser stream",async()=>{
+ const ctx=withAtob(instance()),episode='https://serienstream.to/serie/dexter/staffel-1/episode-1',player='https://rotated-voe.example/e/abc123';
+ ctx.networkFetch=async()=>({success:true,html:'<title>Episode</title>',playerPageURL:player,playerHTML:voePayload({source:'https://media.example/valid.m3u8'}),requests:[]});
+ ctx.fetchv2=async url=>({status:url===player?403:200,text:async()=>url===episode?'<button data-play-url="/r?t=opaque" data-provider-name="VOE" data-language-id="1"></button>':'#EXTM3U\n#EXTINF:1200,\nepisode.ts\n#EXT-X-ENDLIST'});
+ const result=JSON.parse(await ctx.extractStreamUrl(episode,{languagePriority:0}));
+ assert.equal(result.streams[0].streamUrl,'https://media.example/valid.m3u8');
+});
