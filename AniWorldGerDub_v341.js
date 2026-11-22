@@ -515,7 +515,7 @@ async function __awQualityOptions(verified,page,providerName){
 
 async function __awNativeVoe(provider) {
   if(typeof fetchv2!=="function"||!/\bVOE\b/i.test(provider.title)||!/^https:\/\/aniworld\.(?:to|cc)\/redirect\//i.test(provider.url))return null;
-  var page=__shiroxSourceURL(provider.url),deadline=Date.now()+2000;
+  var page=__shiroxSourceURL(provider.url),deadline=Date.now()+4000;
   for(var hop=0;hop<2&&Date.now()<deadline;hop++)try{
     var response=await fetchv2(page,{Referer:__shiroxSourceURL(BASE_URL)+"/"},"GET",null);
     if(!response||Number(response.status)!==200)return null;
@@ -538,15 +538,26 @@ async function __awNativeVoe(provider) {
 }
 
 async function __awCapture(provider) {
-  if(/\bVOE\b/i.test(provider.title)){
-    var native=await new Promise(function(resolve){
-      var settled=false,timer=setTimeout(function(){if(!settled){settled=true;resolve(null)}},2000);
-      Promise.resolve().then(function(){return __awNativeVoe(provider)}).then(function(value){
-        if(!settled){settled=true;clearTimeout(timer);resolve(value)}
-      },function(){if(!settled){settled=true;clearTimeout(timer);resolve(null)}});
-    });
-    if(native&&native.length)return native;
-  }
+  if(!/\bVOE\b/i.test(provider.title))return __awBrowserCapture(provider);
+  // Give the lightweight native path a head start. A slow native request
+  // never adds its entire timeout to the existing browser startup time.
+  return new Promise(function(resolve){
+    var done=false,nativeDone=false,browserDone=false,browserStarted=false;
+    var browserTimer=setTimeout(startBrowser,1000),nativeTimer=setTimeout(function(){nativeDone=true;startBrowser();finish(null)},4000);
+    function finish(value){
+      if(done)return;
+      if(value&&value.length||nativeDone&&browserDone){done=true;clearTimeout(browserTimer);clearTimeout(nativeTimer);resolve(value&&value.length?value:null)}
+    }
+    function startBrowser(){
+      if(done||browserStarted)return;browserStarted=true;clearTimeout(browserTimer);
+      Promise.resolve().then(function(){return __awBrowserCapture(provider)}).then(function(value){browserDone=true;finish(value)},function(){browserDone=true;finish(null)});
+    }
+    Promise.resolve().then(function(){return __awNativeVoe(provider)}).then(function(value){
+      nativeDone=true;if(done)return;finish(value);if(!done)startBrowser();
+    },function(){nativeDone=true;if(!done){startBrowser();finish(null)}});
+  });
+}
+async function __awBrowserCapture(provider) {
   if(typeof networkFetch!=="function")return null;
   var result=await networkFetch(__shiroxSourceURL(provider.url),{
     timeoutSeconds:10,cutoff:".m3u8",returnHTML:true,returnCookies:false,

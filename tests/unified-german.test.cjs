@@ -555,7 +555,7 @@ test('denied native anime lookup keeps the existing browser fallback',async()=>{
 });
 test('stalled native anime lookup cannot hold the browser fallback',async()=>{
  const ctx=animeInstance();let browsers=0;
- ctx.setTimeout=(fn,ms)=>setTimeout(fn,ms===2000?10:ms);
+ ctx.setTimeout=(fn,ms)=>setTimeout(fn,ms===1000?10:ms===4000?40:ms);
  ctx.__awNativeVoe=()=>new Promise(()=>{});
  ctx.networkFetch=async()=>{browsers++;return {success:true,mediaPageURL:'https://player.example/e/abc',requests:['https://media.example/fallback.m3u8']}};
  ctx.__awVerify=async url=>({url,headers:{},type:'hls'});
