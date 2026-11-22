@@ -573,6 +573,13 @@ test('valid native series player skips an unnecessary second browser capture',as
  const result=JSON.parse(await ctx.extractStreamUrl(episode,{languagePriority:0}));
  assert.equal(result.streams.length,1);assert.equal(browsers,1);
 });
+test('a rejected native series manifest still permits the second browser fallback',async()=>{
+ const ctx=withAtob(instance()),episode='https://serienstream.to/serie/dexter/staffel-1/episode-1',player='https://rotated-voe.example/e/abc123';let browsers=0;
+ ctx.networkFetch=async()=>{browsers++;return {success:true,html:'<title>Episode</title>',playerPageURL:player,requests:browsers===1?[]:['https://media.example/browser.m3u8']}};
+ ctx.fetchv2=async url=>({status:url.includes('denied.m3u8')?403:200,url,text:async()=>url===episode?'<button data-play-url="/r?t=opaque" data-provider-name="VOE" data-language-id="1"></button>':url===player?voePayload({source:'https://media.example/denied.m3u8'}):'#EXTM3U\n#EXTINF:1200,\nepisode.ts\n#EXT-X-ENDLIST'});
+ const result=JSON.parse(await ctx.extractStreamUrl(episode,{languagePriority:0}));
+ assert.equal(result.streams[0].streamUrl,'https://media.example/browser.m3u8');assert.equal(browsers,2);
+});
 test("VOE JSON obfuscation is decoded without evaluating page scripts",()=>{
  const ctx=withAtob(instance()),html=voePayload({source:'https://media.example/master.m3u8?token=fixture',direct_access_url:'https://media.example/episode.mp4'});
  assert.deepEqual(Array.from(ctx.__shiroxVoeSources(html)),['https://media.example/master.m3u8?token=fixture','https://media.example/episode.mp4']);

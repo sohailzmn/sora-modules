@@ -761,6 +761,15 @@ async function stoNativePlayerCapture(player, episode) {
  }
  return null;
 }
+async function stoVerifyCapture(c,h){
+ var urls=__awCandidates(c.data,c.base);
+ __awLog(h.title+": "+urls.length+" candidate URLs");
+ for(var j=0;j<Math.min(urls.length,4);j++){
+  var verified=await __awVerify(urls[j],c.base);
+  if(verified)return __shiroxDecorate({title:h.title,streamUrl:verified.streamUrl,headers:verified.headers},h,c.data.html,c.base);
+ }
+ return null;
+}
 async function stoCapture(h,episode){
  if(typeof networkFetch!=="function")return null;
  var options={timeoutSeconds:8,cutoff:".m3u8",returnHTML:true,returnCookies:false,maxWaitTime:2,
@@ -785,8 +794,11 @@ async function stoCapture(h,episode){
  // Obtain short-lived media URLs with the native client that will verify
  // and play them, rather than reusing a token issued to WebKit's network context.
  var nativePlayer=external&&await stoNativePlayerCapture(external,episode);
- if(nativePlayer)captures.unshift({data:nativePlayer,base:nativePlayer.playerPageURL});
- if(!nativePlayer && external && !__awCandidates(first,external||h.url).length){
+ if(nativePlayer){
+  var nativeVerified=await stoVerifyCapture({data:nativePlayer,base:nativePlayer.playerPageURL},h);
+  if(nativeVerified)return nativeVerified;
+ }
+ if(external && !__awCandidates(first,external||h.url).length){
   try{
    var second=await networkFetch(external,Object.assign({},options,{headers:{Referer:BASE_URL+"/"}}));
    __awLog(h.title+" redirected browser: "+stoCaptureSummary(second));
@@ -795,12 +807,8 @@ async function stoCapture(h,episode){
   }catch(e){__awLog("hoster "+h.title+" second player failed")}
  }
  for(var i=0;i<captures.length;i++){
-  var c=captures[i],urls=__awCandidates(c.data,c.base);
-  __awLog(h.title+": "+urls.length+" candidate URLs");
-  for(var j=0;j<Math.min(urls.length,4);j++){
-   var verified=await __awVerify(urls[j],c.base);
-   if(verified)return __shiroxDecorate({title:h.title,streamUrl:verified.streamUrl,headers:verified.headers},h,c.data.html,c.base);
-  }
+  var verified=await stoVerifyCapture(captures[i],h);
+  if(verified)return verified;
  }
  return blocked?{blockedReason:"website_verification_required"}:null;
 }
