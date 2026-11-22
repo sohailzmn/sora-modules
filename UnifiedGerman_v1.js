@@ -518,7 +518,40 @@ async function __awQualityOptions(verified,page,providerName){
 }
 
 
+async function __awNativeVoe(provider) {
+  if(typeof fetchv2!=="function"||!/\bVOE\b/i.test(provider.title)||!/^https:\/\/aniworld\.(?:to|cc)\/redirect\//i.test(provider.url))return null;
+  var page=__shiroxSourceURL(provider.url),deadline=Date.now()+2000;
+  for(var hop=0;hop<2&&Date.now()<deadline;hop++)try{
+    var response=await fetchv2(page,{Referer:__shiroxSourceURL(BASE_URL)+"/"},"GET",null);
+    if(!response||Number(response.status)!==200)return null;
+    var finalPage=response.url,html=String(await response.text());
+    if(!__awPublic(finalPage)||!/^\/e\/[a-z0-9]+\/?$/i.test(String(finalPage).replace(/^https?:\/\/[^/]+/i,"").split(/[?#]/)[0])||html.length>1000000||Date.now()>=deadline)return null;
+    var urls=__shiroxVoeSources(html);
+    for(var i=0;i<Math.min(urls.length,2)&&Date.now()<deadline;i++){
+      var checked=await __awVerify(urls[i],finalPage);
+      if(checked){
+        __awLog("VOE native player verified");
+        var choices=await __awQualityOptions(checked,finalPage,provider.title);
+        return choices.map(function(s){return __shiroxDecorate(s,provider,html,finalPage)});
+      }
+    }
+    var redirect=html.match(/window\.location\.href\s*=\s*["']([^"']+)["']/),next=redirect&&__awAbsolute(redirect[1],finalPage);
+    if(!__awPublic(next)||!/^\/e\/[a-z0-9]+\/?$/i.test(String(next).replace(/^https?:\/\/[^/]+/i,"").split(/[?#]/)[0]))return null;
+    page=next;
+  }catch(e){return null}
+  return null;
+}
+
 async function __awCapture(provider) {
+  if(/\bVOE\b/i.test(provider.title)){
+    var native=await new Promise(function(resolve){
+      var settled=false,timer=setTimeout(function(){if(!settled){settled=true;resolve(null)}},2000);
+      Promise.resolve().then(function(){return __awNativeVoe(provider)}).then(function(value){
+        if(!settled){settled=true;clearTimeout(timer);resolve(value)}
+      },function(){if(!settled){settled=true;clearTimeout(timer);resolve(null)}});
+    });
+    if(native&&native.length)return native;
+  }
   if(typeof networkFetch!=="function")return null;
   var result=await networkFetch(__shiroxSourceURL(provider.url),{
     timeoutSeconds:10,cutoff:".m3u8",returnHTML:true,returnCookies:false,
@@ -1257,7 +1290,7 @@ async function stoCapture(h,episode){
  // and play them, rather than reusing a token issued to WebKit's network context.
  var nativePlayer=external&&await stoNativePlayerCapture(external,episode);
  if(nativePlayer)captures.unshift({data:nativePlayer,base:nativePlayer.playerPageURL});
- if(external && !__awCandidates(first,external||h.url).length){
+ if(!nativePlayer && external && !__awCandidates(first,external||h.url).length){
   try{
    var second=await networkFetch(external,Object.assign({},options,{headers:{Referer:BASE_URL+"/"}}));
    __awLog(h.title+" redirected browser: "+stoCaptureSummary(second));

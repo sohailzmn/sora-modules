@@ -786,7 +786,7 @@ async function stoCapture(h,episode){
  // and play them, rather than reusing a token issued to WebKit's network context.
  var nativePlayer=external&&await stoNativePlayerCapture(external,episode);
  if(nativePlayer)captures.unshift({data:nativePlayer,base:nativePlayer.playerPageURL});
- if(external && !__awCandidates(first,external||h.url).length){
+ if(!nativePlayer && external && !__awCandidates(first,external||h.url).length){
   try{
    var second=await networkFetch(external,Object.assign({},options,{headers:{Referer:BASE_URL+"/"}}));
    __awLog(h.title+" redirected browser: "+stoCaptureSummary(second));
