@@ -20,6 +20,23 @@ async function __shiroxSourceRequest(url,headers,method,body){
   if(response)return response;return next;
  }catch(e){if(response)return response;throw e}
 }
+// Decode VOE's published JSON payload without evaluating page scripts.
+function __shiroxVoeSources(html){
+ if(typeof atob!=="function")return [];
+ var blocks=String(html||"").match(/<script\b[^>]*type=["']application\/json["'][^>]*>[\s\S]*?<\/script>/gi)||[];
+ for(var i=0;i<Math.min(blocks.length,8);i++)try{
+  var body=blocks[i].replace(/^<script\b[^>]*>|<\/script>$/gi,"");if(body.length>262144)continue;
+  var payload=JSON.parse(body);if(!Array.isArray(payload)||typeof payload[0]!=="string")continue;
+  var stage=payload[0].replace(/[A-Za-z]/g,function(c){var n=c.charCodeAt(0),base=n<=90?65:97;return String.fromCharCode(base+(n-base+13)%26)});
+  ["@$","^^","~@","%?","*~","!!","#&"].forEach(function(noise){stage=stage.split(noise).join("_")});
+  stage=atob(stage.replace(/_/g,""));stage=stage.split("").map(function(c){return String.fromCharCode(c.charCodeAt(0)-3)}).reverse().join("");
+  var data=JSON.parse(atob(stage));
+  var values=[data.source,data.direct_access_url].filter(function(url){return typeof url==="string"&&/^https?:\/\//i.test(url)&&/\.(?:m3u8|mp4)(?:[?#]|$)/i.test(url)});
+  if(values.length)return values;
+ }catch(e){}
+ return [];
+}
+
 // __SHIROX_LANGUAGE_CONTRACT_V2: per-episode language-aware resolver.
 function __shiroxAttr(tag,key){
  var m=String(tag||"").match(new RegExp("(?:^|\\s)"+key+"\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)')","i"));
@@ -184,6 +201,7 @@ function __awCandidates(capture, pageUrl) {
   var inputs = Array.isArray(capture && capture.requests) ? capture.requests.slice() : [];
   if (capture && capture.cutoffUrl) inputs.push(capture.cutoffUrl);
   var html = String(capture && capture.html || "");
+  inputs=inputs.concat(__shiroxVoeSources(html),__shiroxVoeSources(capture&&capture.playerHTML));
   var tags = html.match(/<(?:video|source)\b[^>]*>/gi) || [];
   for (var j = 0; j < tags.length; j++) inputs.push(__awAttr(tags[j], "src") || __awAttr(tags[j], "data-src"));
   // Some players expose the HLS file in a JS config without emitting a request.
@@ -702,7 +720,7 @@ function stoHosters(html){
  return out;
 }
 function stoProvider(capture,provider){
- var finalPage=capture&&(capture.mediaPageURL||capture.originalUrl||capture.url);
+ var finalPage=capture&&(capture.mediaPageURL||capture.playerPageURL||capture.originalUrl||capture.url);
  if(__awPublic(finalPage)&&!/^https?:\/\/(?:www\.)?(?:serienstream\.(?:to|cx)|s\.to)\//i.test(finalPage)&&!__awMediaKind(finalPage))return finalPage;
  var items=Array.isArray(capture&&capture.requests)?capture.requests.slice():[];
  if(capture&&capture.cutoffUrl)items.unshift(capture.cutoffUrl);

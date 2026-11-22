@@ -479,3 +479,33 @@ test("verified adaptive master starts without serial rendition requests", async 
   const result=await ctx.__awQualityOptions({url:"https://media.example/master.m3u8",type:"hls",headers:{Referer:"https://player.example"},playlist:'#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=854x480\n480.m3u8'},"https://player.example","VOE");
   assert.equal(result.length,1);assert.equal(result[0].streamUrl,"https://media.example/master.m3u8");
 });
+
+
+function voePayload(value) {
+ let stage=Buffer.from(JSON.stringify(value),'utf8').toString('base64');
+ stage=Array.from(stage).reverse().map(c=>String.fromCharCode(c.charCodeAt(0)+3)).join('');
+ stage=Buffer.from(stage,'binary').toString('base64').replace(/[A-Za-z]/g,c=>String.fromCharCode((c.charCodeAt(0)-(c<='Z'?65:97)+13)%26+(c<='Z'?65:97)));
+ return '<script type="application/json">'+JSON.stringify([stage.replace(/(.{4})/g,'$1@$')])+'</script>';
+}
+function withAtob(ctx){ctx.atob=value=>Buffer.from(value,'base64').toString('binary');return ctx;}
+test("VOE JSON obfuscation is decoded without evaluating page scripts",()=>{
+ const ctx=withAtob(instance()),html=voePayload({source:'https://media.example/master.m3u8?token=fixture',direct_access_url:'https://media.example/episode.mp4'});
+ assert.deepEqual(Array.from(ctx.__shiroxVoeSources(html)),['https://media.example/master.m3u8?token=fixture','https://media.example/episode.mp4']);
+ assert.equal(ctx.__shiroxVoeSources(voePayload({source:'javascript:alert(1)'})).length,0);
+ assert.equal(ctx.__shiroxVoeSources('<script type="application/json">["broken"]</script>').length,0);
+});
+test("VOE iframe payload supplies media even before a browser media request exists",()=>{
+ const ctx=withAtob(seriesInstance()),capture={html:'<title>Series episode</title>',playerHTML:voePayload({source:'https://media.example/master.m3u8'}),playerPageURL:'https://rotated-voe.example/e/abc123',requests:[]};
+ assert.deepEqual(Array.from(ctx.__awCandidates(capture,capture.playerPageURL)),['https://media.example/master.m3u8']);
+ assert.equal(ctx.stoProvider(capture,'VOE'),capture.playerPageURL);
+});
+test("verified series iframe payload keeps its real origin through stream resolution",async()=>{
+ const ctx=withAtob(instance()),episode='https://serienstream.to/serie/dexter/staffel-1/episode-1';
+ const referers=[];
+ ctx.fetchv2=async(url,headers)=>{if(url!==episode)referers.push(headers.Referer);return {status:200,text:async()=>url===episode?'<button data-play-url="/r?t=opaque" data-provider-name="VOE" data-language-id="1"></button>':'#EXTM3U\n#EXTINF:1200,\nepisode.ts\n#EXT-X-ENDLIST'}};
+ ctx.networkFetch=async()=>({success:true,html:'<title>Episode</title>',playerPageURL:'https://rotated-voe.example/e/abc123',playerHTML:voePayload({source:'https://media.example/master.m3u8'}),requests:[]});
+ const result=JSON.parse(await ctx.extractStreamUrl(episode,{languagePriority:0}));
+ assert.equal(result.streams[0].streamUrl,'https://media.example/master.m3u8');
+ assert.equal(result.streams[0].audioLanguage,'de');
+ assert.ok(referers.includes('https://rotated-voe.example/'));
+});
