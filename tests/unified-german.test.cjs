@@ -532,54 +532,6 @@ function voePayload(value) {
  return '<script type="application/json">'+JSON.stringify([stage.replace(/(.{4})/g,'$1@$')])+'</script>';
 }
 function withAtob(ctx){ctx.atob=value=>Buffer.from(value,'base64').toString('binary');return ctx;}
-function animeInstance(){
- const ctx=withAtob(instance());
- vm.runInContext(fs.readFileSync(path.join(__dirname,'..','AniWorldGerDub_v341.js'),'utf8'),ctx);
- return ctx;
-}
-test('VOE anime resolves and verifies natively without starting a browser',async()=>{
- const ctx=animeInstance(),calls=[],redirect='https://aniworld.to/redirect/real',rotated='https://rotated-voe.example/e/abc123',media='https://media.example/master.m3u8';
- let browsers=0;ctx.networkFetch=async()=>{browsers++;return {success:false}};
- ctx.fetchv2=async(url,headers)=>{calls.push({url,headers});return {status:200,url:url===redirect?'https://voe.sx/e/abc123':url,text:async()=>url===redirect?'window.location.href="'+rotated+'"':url===rotated?voePayload({source:media}):'#EXTM3U\n#EXTINF:120,\nepisode.ts'}};
- const streams=await ctx.__awCapture({url:redirect,title:'VOE',language:{audioLanguage:'de'}});
- assert.equal(streams[0].streamUrl,media);assert.equal(streams[0].audioLanguage,'de');assert.equal(browsers,0);
- assert.deepEqual(calls.map(c=>c.url),[redirect,rotated,media]);assert.equal(calls[2].headers.Referer,'https://rotated-voe.example/');
-});
-test('denied native anime lookup keeps the existing browser fallback',async()=>{
- const ctx=animeInstance();let browsers=0;
- ctx.fetchv2=async()=>({status:403,text:async()=>''});
- ctx.networkFetch=async()=>{browsers++;return {success:true,mediaPageURL:'https://player.example/e/abc',requests:['https://media.example/fallback.m3u8']}};
- ctx.__awVerify=async url=>({url,headers:{},type:'hls'});
- const streams=await ctx.__awCapture({url:'https://aniworld.to/redirect/real',title:'VOE',language:{audioLanguage:'de'}});
- assert.equal(streams[0].streamUrl,'https://media.example/fallback.m3u8');assert.equal(browsers,1);
-});
-test('stalled native anime lookup cannot hold the browser fallback',async()=>{
- const ctx=animeInstance();let browsers=0;
- ctx.setTimeout=(fn,ms)=>setTimeout(fn,ms===1000?10:ms===4000?40:ms);
- ctx.__awNativeVoe=()=>new Promise(()=>{});
- ctx.networkFetch=async()=>{browsers++;return {success:true,mediaPageURL:'https://player.example/e/abc',requests:['https://media.example/fallback.m3u8']}};
- ctx.__awVerify=async url=>({url,headers:{},type:'hls'});
- assert.equal((await ctx.__awCapture({url:'https://aniworld.to/redirect/real',title:'VOE',language:{audioLanguage:'de'}})).length,1);assert.equal(browsers,1);
-});
-test('first verified anime mode does not start a mirror grace wait',async()=>{
- const ctx=instance(),delays=[];ctx.setTimeout=(fn,ms)=>{delays.push(ms);return setTimeout(fn,ms)};
- const streams=await ctx.__shiroxResolveLanguage([0,1].map(id=>({id,language:{languagePriority:0}})),async h=>h.id?new Promise(()=>{}):{streamUrl:'https://media.example/master.m3u8',audioLanguage:'de'},{languagePriority:0,firstVerifiedOnly:true});
- assert.equal(streams.length,1);assert.equal(delays.includes(500),false);
-});
-test('valid native series player skips an unnecessary second browser capture',async()=>{
- const ctx=withAtob(instance()),episode='https://serienstream.to/serie/dexter/staffel-1/episode-1',player='https://rotated-voe.example/e/abc123';let browsers=0;
- ctx.networkFetch=async()=>{browsers++;return {success:true,html:'<title>Episode</title>',playerPageURL:player,requests:[]}};
- ctx.fetchv2=async url=>({status:200,url,text:async()=>url===episode?'<button data-play-url="/r?t=opaque" data-provider-name="VOE" data-language-id="1"></button>':url===player?voePayload({source:'https://media.example/master.m3u8'}):'#EXTM3U\n#EXTINF:1200,\nepisode.ts\n#EXT-X-ENDLIST'});
- const result=JSON.parse(await ctx.extractStreamUrl(episode,{languagePriority:0}));
- assert.equal(result.streams.length,1);assert.equal(browsers,1);
-});
-test('a rejected native series manifest still permits the second browser fallback',async()=>{
- const ctx=withAtob(instance()),episode='https://serienstream.to/serie/dexter/staffel-1/episode-1',player='https://rotated-voe.example/e/abc123';let browsers=0;
- ctx.networkFetch=async()=>{browsers++;return {success:true,html:'<title>Episode</title>',playerPageURL:player,requests:browsers===1?[]:['https://media.example/browser.m3u8']}};
- ctx.fetchv2=async url=>({status:url.includes('denied.m3u8')?403:200,url,text:async()=>url===episode?'<button data-play-url="/r?t=opaque" data-provider-name="VOE" data-language-id="1"></button>':url===player?voePayload({source:'https://media.example/denied.m3u8'}):'#EXTM3U\n#EXTINF:1200,\nepisode.ts\n#EXT-X-ENDLIST'});
- const result=JSON.parse(await ctx.extractStreamUrl(episode,{languagePriority:0}));
- assert.equal(result.streams[0].streamUrl,'https://media.example/browser.m3u8');assert.equal(browsers,2);
-});
 test("VOE JSON obfuscation is decoded without evaluating page scripts",()=>{
  const ctx=withAtob(instance()),html=voePayload({source:'https://media.example/master.m3u8?token=fixture',direct_access_url:'https://media.example/episode.mp4'});
  assert.deepEqual(Array.from(ctx.__shiroxVoeSources(html)),['https://media.example/master.m3u8?token=fixture','https://media.example/episode.mp4']);
