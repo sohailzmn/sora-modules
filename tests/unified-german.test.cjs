@@ -49,6 +49,7 @@ test("series metadata reads Open Graph regardless of attribute order", async () 
 
 test("unified playback automatically uses an available hoster when the first stalls", async () => {
   const ctx = instance();
+  ctx.setTimeout=(callback,ms)=>setTimeout(callback,ms/100);
   const episode = "https://serienstream.to/serie/dexter-wiedererwachen/staffel-2/episode-6";
   const visited = [];
   ctx.fetchv2 = async url => ({status:200, text:async()=>url===episode ?
@@ -65,6 +66,48 @@ test("unified playback automatically uses an available hoster when the first sta
   assert.equal(visited.length,2);
   assert.ok(visited.every(url => url === episode));
   assert.equal(result.blockedReason,undefined);
+});
+
+test("series gate sessions never overlap and stop at the first verified mirror", async () => {
+  const ctx=instance(),episode='https://serienstream.to/serie/dexter-wiedererwachen/staffel-1/episode-1';
+  let active=0,peak=0;const providers=[];
+  ctx.fetchv2=async url=>({status:200,text:async()=>url===episode?
+    '<button data-play-url="/r?t=one" data-provider-name="VOE" data-language-id="1"></button>'+
+    '<button data-play-url="/r?t=two" data-provider-name="Vidmoly" data-language-id="1"></button>':'#EXTM3U\n#EXTINF:120,\nsegment.ts'});
+  ctx.networkFetch=async(url,options)=>{
+    active++;peak=Math.max(peak,active);providers.push(options.clickSelectors[0]);
+    await new Promise(resolve=>setTimeout(resolve,10));active--;
+    return {success:true,requests:['https://media.example/verified.m3u8'],html:''};
+  };
+  const result=JSON.parse(await ctx.extractStreamUrl(episode,{languagePriority:0}));
+  assert.equal(result.streams.length,1);assert.equal(peak,1);assert.equal(providers.length,1);
+  assert.ok(providers[0].includes('VOE'));
+});
+
+test("a failed series gate completes before its fallback starts",async()=>{
+  const ctx=instance(),episode='https://serienstream.to/serie/dexter/staffel-1/episode-1';
+  let active=0,peak=0;const providers=[];
+  ctx.fetchv2=async url=>({status:200,text:async()=>url===episode?
+    '<button data-play-url="/r?t=one" data-provider-name="VOE" data-language-id="1"></button>'+
+    '<button data-play-url="/r?t=two" data-provider-name="Vidmoly" data-language-id="1"></button>':'#EXTM3U\n#EXTINF:120,\nsegment.ts'});
+  ctx.networkFetch=async(url,options)=>{
+    active++;peak=Math.max(peak,active);providers.push(options.clickSelectors[0]);
+    await new Promise(resolve=>setTimeout(resolve,10));active--;
+    return providers.length===1?{success:false}:{success:true,requests:['https://media.example/fallback.m3u8'],html:''};
+  };
+  const result=JSON.parse(await ctx.extractStreamUrl(episode,{languagePriority:0}));
+  assert.equal(result.streams.length,1);assert.equal(peak,1);assert.equal(providers.length,2);
+  assert.ok(providers[0].includes('VOE'));assert.ok(providers[1].includes('Vidmoly'));
+});
+
+test("ordinary anime mirror resolution retains independent parallel captures",async()=>{
+  const ctx=instance();ctx.setTimeout=(callback,ms)=>setTimeout(callback,ms/100);
+  const visited=[];
+  const result=await ctx.__shiroxResolveLanguage([0,1].map(id=>({id,language:{languagePriority:0}})),async hoster=>{
+    visited.push(hoster.id);if(!hoster.id)return new Promise(()=>{});
+    return {streamUrl:'https://media.example/anime.m3u8',audioLanguage:'de'};
+  },{languagePriority:0});
+  assert.equal(result.length,1);assert.deepEqual(visited,[0,1]);
 });
 function instance() {
   const context = vm.createContext({
