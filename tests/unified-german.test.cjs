@@ -109,6 +109,28 @@ test("ordinary anime mirror resolution retains independent parallel captures",as
   },{languagePriority:0});
   assert.equal(result.length,1);assert.deepEqual(visited,[0,1]);
 });
+
+test("resume remembers a provider only within German audio candidates",async()=>{
+ const ctx=instance(),visited=[];
+ const hosters=[{title:'VOE',language:{languagePriority:0}},{title:'Vidmoly',language:{languagePriority:0}},
+  {title:'Vidmoly',language:{languagePriority:2}}];
+ const streams=await ctx.__shiroxResolveLanguage(hosters,async hoster=>{
+  visited.push(hoster.title+':'+hoster.language.languagePriority);
+  return {streamUrl:'https://media.example/german.m3u8',audioLanguage:'de'};
+ },{languagePriority:0,preferredProvider:'Vidmoly · Auto HLS',sequentialCaptures:true,firstVerifiedOnly:true});
+ assert.equal(streams.length,1);assert.deepEqual(visited,['Vidmoly:0']);
+});
+
+test("a remembered subtitle provider never displaces an available German dub",async()=>{
+ const ctx=instance(),visited=[];
+ const streams=await ctx.__shiroxResolveLanguage([
+  {title:'Old subtitle provider',language:{languagePriority:2}},
+  {title:'German provider',language:{languagePriority:0}}
+ ],async hoster=>{
+  visited.push(hoster.title);return {streamUrl:'https://media.example/german.m3u8',audioLanguage:'de'};
+ },{preferredProvider:'Old subtitle provider',sequentialCaptures:true,firstVerifiedOnly:true});
+ assert.equal(streams.length,1);assert.deepEqual(visited,['German provider']);
+});
 function instance() {
   const context = vm.createContext({
     console: { warn() {}, log() {} },

@@ -84,7 +84,13 @@ async function __shiroxResolveLanguage(hosters,capture,options){
  var specified=options&&typeof options.languagePriority==="number",first=specified?options.languagePriority:0,last=specified?first:2;
  var blockedReason=null,concurrency=options&&options.sequentialCaptures?1:3,firstOnly=!!(options&&options.firstVerifiedOnly);
  for(var priority=first;priority<=last;priority++){
-  var candidates=hosters.filter(function(h){var l=h.language||{};return l.languagePriority===priority||(priority>0&&l.languagePriority===3)}).slice(0,12);
+  var candidates=hosters.filter(function(h){var l=h.language||{};return l.languagePriority===priority||(priority>0&&l.languagePriority===3)});
+  // A remembered provider is only a tie-breaker INSIDE the current language.
+  // Never promote a previously selected subtitle mirror above German audio.
+  var preferred=options&&options.preferredProvider;
+  function providerName(value){return String(value||"").split(/[·|]/)[0].trim().toLowerCase()}
+  if(preferred)candidates.sort(function(a,b){return Number(providerName(b.title)===providerName(preferred))-Number(providerName(a.title)===providerName(preferred))});
+  candidates=candidates.slice(0,12);
   if(!candidates.length)continue;
   var streams=await new Promise(function(resolve){
    var done=false,next=0,active=0,out=[],seen={},grace,timer=setTimeout(finish,options&&options.sequentialCaptures?30000:24000);
