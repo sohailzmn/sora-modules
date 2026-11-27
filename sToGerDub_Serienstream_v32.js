@@ -303,12 +303,12 @@ function stoActualTitle(html) {
 
 function stoImage(html,title){
  var src=stoMeta(html,"og:image"),imgs=String(html||"").match(/<img\b[^>]*>/gi)||[],fallback="";
- if(!src)for(var i=0;i<imgs.length;i++){
+ for(var i=0;i<imgs.length;i++){
   var tag=imgs[i],alt=stoNormalizeTitle(__awAttr(tag,"alt"));
   var url=__awAttr(tag,"data-src")||__awAttr(tag,"src")||__awAttr(tag,"data-original");
   if(!url){var srcset=__awAttr(tag,"srcset");if(srcset)url=srcset.split(",")[0].trim().split(/\s+/)[0]}
   if(!url||url.indexOf("data:")===0)continue;
-  if(alt===stoNormalizeTitle(title)){src=url;break}
+  if(alt===stoNormalizeTitle(title)||alt===stoNormalizeTitle(title)+" poster"||alt===stoNormalizeTitle(title)+" cover"){src=url;break}
   if(!fallback && /poster|cover|serie/i.test(alt))fallback=url;
  }
  src=src||fallback;
@@ -561,10 +561,11 @@ async function searchResults(keyword){
 async function extractDetails(url){
  try{
   var html=await __requestText(stoCanon(url),{headers:{Accept:"text/html",Referer:BASE_URL+"/"}});
-  var desc=__awAttr((html.match(/<p\b[^>]*class=["'][^"']*seri_des[^"']*["'][^>]*>/i)||[""])[0],"data-full-description")||
+  var desc=(html.match(/<(?:span|p|div)\b[^>]*class=["'][^"']*\bdescription-text\b[^"']*["'][^>]*>([\s\S]*?)<\/(?:span|p|div)>/i)||[])[1]||
+   __awAttr((html.match(/<p\b[^>]*class=["'][^"']*seri_des[^"']*["'][^>]*>/i)||[""])[0],"data-full-description")||
    (html.match(/<meta\b[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i)||[])[1]||"";
   var aliases=__awAttr((html.match(/<h1\b[^>]*>/i)||[""])[0],"data-alternativetitles");
-  return JSON.stringify([{description:stoClean(desc||stoMeta(html,"og:description")),aliases:stoClean(aliases),airdate:"",image:stoImage(html,stoActualTitle(html))}]);
+  return JSON.stringify([{description:stoClean(desc||stoMeta(html,"og:description")),aliases:stoClean(aliases),airdate:"",image:stoImage(html,stoActualTitle(html)),backdrop:stoMeta(html,"og:image")?__awAbsolute(stoMeta(html,"og:image"),BASE_URL+"/"):""}]);
  }catch(e){return JSON.stringify([{description:"",aliases:"",airdate:""}])}
 }
 

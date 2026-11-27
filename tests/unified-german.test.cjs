@@ -640,3 +640,9 @@ test("official playback rejects geo errors, a different episode and unconfirmed 
 test("official embedded data is parsed as JSON without executing scripts",()=>{
  const c=instance();assert.equal(c.__UNIFIED_SOUTHPARK.parseData('<script>window.__DATA__ = {"text":"brace } and \\\" quote","items":[]};malicious()</script>').items.length,0);assert.equal(c.__UNIFIED_SOUTHPARK.parseData('<script>window.__DATA__ = execute()</script>'),null);
 });
+
+
+test("series details prefer the complete German story and real poster over SEO/backdrop",async()=>{
+ const c=seriesInstance();c.__requestText=async()=>'<h1>MobLand</h1><meta name="description" content="Watch MobLand online..."><meta property="og:image" content="/backdrop.jpg"><img alt="MobLand Cover" data-src="/poster.jpg"><div class="series-description"><p class="clamped"><span class="description-text">Die vollständige Handlung mit <em>allen</em> Details &amp; einem zweiten Absatz.</span></p></div>';
+ const details=JSON.parse(await c.extractDetails('https://serienstream.to/serie/mobland'))[0];assert.equal(details.description,'Die vollständige Handlung mit allen Details & einem zweiten Absatz.');assert.equal(details.image,'https://serienstream.to/poster.jpg');assert.equal(details.backdrop,'https://serienstream.to/backdrop.jpg');
+});
