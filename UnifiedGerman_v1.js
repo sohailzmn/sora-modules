@@ -1346,29 +1346,139 @@ async function extractStreamUrl(url,options){
 return {searchResults:searchResults,extractDetails:extractDetails,extractEpisodes:extractEpisodes,extractStreamUrl:extractStreamUrl};
 })();
 
+
+// Official, freely published German South Park episodes. Uses the site's
+// own catalogue and stitched HLS; does not strip ads or bypass geo/DRM rules.
+var __UNIFIED_SOUTHPARK=(function(){
+ var BASE="https://www.southpark.de",ROOT=BASE+"/seasons/south-park",cachedPage=null;
+ async function read(url){
+  if(!/^https:\/\/(?:www\.southpark\.de|topaz\.paramount\.tech|ns-stream\.paramount\.tech)(?:\/|$)/i.test(url))return "";
+  var response=await __unifiedWithin(fetchv2(url,{Accept:"text/html,application/json,application/vnd.apple.mpegurl","Accept-Language":"de-DE,de;q=0.9"},"GET",null),5000,null,"South Park public request");
+  if(!response||response.status&&Number(response.status)!==200)return "";
+  return typeof response.text==="function"?await response.text():String(response);
+ }
+ function data(html){
+  var text=String(html||""),m=/window\.__DATA__\s*=\s*/.exec(text);if(!m)return null;
+  var start=m.index+m[0].length,quoted=false,escaped=false,depth=0;
+  for(var i=start;i<Math.min(text.length,start+2000000);i++){
+   var c=text.charAt(i);
+   if(quoted){if(escaped)escaped=false;else if(c==="\\")escaped=true;else if(c==='"')quoted=false}
+   else if(c==='"')quoted=true;else if(c==="{"||c==="[")depth++;else if(c==="}"||c==="]"){depth--;if(depth===0){try{return JSON.parse(text.slice(start,i+1))}catch(e){return null}}}
+  }
+  return null;
+ }
+ function visit(value,fn){if(!value||typeof value!=="object")return;fn(value);Object.keys(value).forEach(function(k){if(value[k]&&typeof value[k]==="object")visit(value[k],fn)})}
+ function meta(html,key){var tags=String(html||"").match(/<meta\b[^>]*>/gi)||[];for(var i=0;i<tags.length;i++)if(__shiroxAttr(tags[i],"property")===key)return __shiroxAttr(tags[i],"content").replace(/&amp;/g,"&");return ""}
+ async function page(){if(!cachedPage)cachedPage=read(ROOT);return cachedPage}
+ async function search(keyword){
+  if(!/^south\s*park$/i.test(String(keyword||"").trim()))return "[]";
+  var html=await page();
+  if(!/\/folgen\/[^/]+\/south-park-[^"'<>]+-staffel-\d+-ep-\d+/i.test(html))return "[]";
+  return JSON.stringify([{title:"South Park",href:ROOT,image:meta(html,"og:image")}]);
+ }
+ async function details(){var html=await page();return JSON.stringify([{description:meta(html,"og:description"),image:meta(html,"og:image"),aliases:"South Park"}])}
+ function seasonPaths(html){
+  var paths={1:ROOT},d=data(html);
+  visit(d,function(x){var m=String(x.url||"").match(/^\/seasons\/south-park\/[a-z0-9]+\/staffel-(\d+)$/i);if(m)paths[Number(m[1])]=BASE+x.url});
+  return paths;
+ }
+ function collect(d,rows,seen){
+  visit(d,function(x){
+   if(x.itemType!=="episode")return;
+   var path=String(x.url||""),m=path.match(/^\/folgen\/[a-z0-9]+\/south-park-[a-z0-9-]+-staffel-(\d+)-ep-(\d+)$/i);
+   if(!m||seen[path])return;seen[path]=true;
+   rows.push({season:Number(m[1]),local:Number(m[2]),href:BASE+path});
+  });
+ }
+ async function seasonPage(url){
+  var html=url===ROOT?await page():await read(url),d=data(html),rows=[],seen={},more="";
+  collect(d,rows,seen);
+  visit(d,function(x){if(x.isEpisodes&&x.loadMore)more=String(x.loadMore.url||"")});
+  // Follow only the actual public pagination link and its published page size.
+  var pagination=more.match(/^(\/api\/context\/mgid%3Aarc%3Aseason%3Asouthpark\.intl%3A[a-f0-9-]+\/episode\/)(\d+)(\/10)$/i);
+  if(pagination)for(var pageNumber=Number(pagination[2]);pageNumber<10;pageNumber++){
+   var extra;try{extra=JSON.parse(await read(BASE+pagination[1]+pageNumber+pagination[3]))}catch(e){break}
+   var count=rows.length;collect(extra,rows,seen);if(rows.length-count<10)break;
+  }
+  return rows;
+ }
+ async function episodes(){
+  var paths=seasonPaths(await page()),numbers=Object.keys(paths).map(Number).sort(function(a,b){return a-b}),rows=[];
+  // Four bounded requests at a time; one missing season cannot hide the others.
+  for(var i=0;i<numbers.length;i+=4){
+   var batch=await Promise.all(numbers.slice(i,i+4).map(function(n){return seasonPage(paths[n]).catch(function(){return []})}));
+   batch.forEach(function(group){rows=rows.concat(group)});
+  }
+  rows.sort(function(a,b){return a.season-b.season||a.local-b.local});
+  return JSON.stringify(rows.map(function(row,i){return {number:i+1,href:row.href}}));
+ }
+ async function streams(url,options){
+  var empty=JSON.stringify({streams:[],subtitles:[]});
+  if(options&&Number(options.languagePriority)>0)return empty;
+  if(!/^https:\/\/www\.southpark\.de\/folgen\/[a-z0-9]+\/south-park-[a-z0-9-]+-staffel-\d+-ep-\d+$/i.test(url))return empty;
+  var d=data(await read(url)),service="";
+  visit(d,function(x){if(typeof x.videoServiceUrl==="string"&&!service)service=x.videoServiceUrl});
+  if(!/^https:\/\/topaz\.paramount\.tech\/topaz\/api\/mgid:arc:episode:shared\.southpark\.gsa\.de:[a-f0-9-]+\/mica\.json\?/i.test(service))return empty;
+  service=service.replace(/\{clientPlatform\}/g,"desktop").replace(/\{[^}]+\}/g,"");
+  var response;try{response=JSON.parse(await read(service))}catch(e){return empty}
+  if(response.error||!response.stitchedstream||response.stitchedstream.manifesttype!=="hls")return empty;
+  var expected=(service.match(/\/api\/(mgid:[^/]+)\//)||[])[1];
+  if(!(response.content||[]).some(function(item){return item.id===expected}))return empty;
+  var media=response.stitchedstream.source;
+  if(!/^https:\/\/ns-stream\.paramount\.tech\//i.test(media))return empty;
+  var manifest=await read(media);
+  if(!/^#EXTM3U/.test(manifest)||!/#EXT-X-MEDIA:[^\n]*TYPE=AUDIO[^\n]*LANGUAGE="de"/i.test(manifest)||/METHOD=SAMPLE-AES/i.test(manifest))return empty;
+  return JSON.stringify({streams:[{title:"South Park offiziell · Deutsch",streamUrl:media,audioLanguage:"de",headers:{Referer:url}}],subtitles:[]});
+ }
+ return {searchResults:search,extractDetails:details,extractEpisodes:episodes,extractStreamUrl:streams,parseData:data};
+})();
+
 var __UNIFIED_SOURCES=[
   {id:"aniworld",base:"https://aniworld.to",api:__UNIFIED_ANIWORLD},
-  {id:"serienstream",base:"https://serienstream.to",api:__UNIFIED_SERIENSTREAM}
+  {id:"serienstream",base:"https://serienstream.to",api:__UNIFIED_SERIENSTREAM},
+  {id:"southpark",base:"https://www.southpark.de",api:__UNIFIED_SOUTHPARK}
 ];
 
 function __unifiedCatalogRows(html,kind){
   var source=kind==="anime"?__UNIFIED_SOURCES[0]:__UNIFIED_SOURCES[1],out=[],seen={};
-  var links=String(html||"").match(/<a\b[^>]*>[\s\S]*?<\/a>/gi)||[];
-  links.forEach(function(link){
-    var tag=(link.match(/^<a\b[^>]*>/i)||[""])[0],href=__unifiedAbsolute(source,__shiroxAttr(tag,"href"));
+  var text=String(html||""),regex=/<a\b[^>]*>[\s\S]*?<\/a>/gi,found;
+  function clean(value){return String(value||"").replace(/<[^>]*>/g," ").replace(/&amp;/gi,"&").replace(/&quot;/gi,'"').replace(/&#39;/gi,"'").replace(/\s+/g," ").trim()}
+  function pictureFrom(markup){
+    var image=(markup.match(/<img\b[^>]*>/i)||[""])[0];
+    var value=__shiroxAttr(image,"data-src")||__shiroxAttr(image,"data-lazy-src")||__shiroxAttr(image,"src");
+    if(!value||/^data:/i.test(value))value=(__shiroxAttr(image,"data-srcset")||__shiroxAttr(image,"srcset")).trim().split(/[,\s]+/)[0];
+    if(!value||/^data:/i.test(value)){
+      var tags=markup.match(/<source\b[^>]*>/gi)||[];
+      for(var i=0;i<tags.length&&!value;i++)value=(__shiroxAttr(tags[i],"data-srcset")||__shiroxAttr(tags[i],"srcset")).trim().split(/[,\s]+/)[0];
+    }
+    return !value||/^data:|^javascript:/i.test(value)?"":__unifiedAbsolute(source,value.replace(/&amp;/g,"&"));
+  }
+  while((found=regex.exec(text))!==null){
+    var link=found[0],tag=(link.match(/^<a\b[^>]*>/i)||[""])[0],href=__unifiedAbsolute(source,__shiroxAttr(tag,"href"));
     var match=href.match(kind==="anime"?/^https:\/\/(?:www\.)?aniworld\.(?:to|cc)(\/anime\/stream\/[^/?#]+)/i:/^https:\/\/(?:www\.)?(?:serienstream\.(?:to|cx)|s\.to)(\/serie\/(?:stream\/)?[^/?#]+)/i);
-    if(!match)return;
-    // Episode promotions are not a series catalogue entry.
-    if(/\/episode-\d+/i.test(href))return;
-    href=source.base+match[1];if(seen[href])return;
+    if(!match||/\/episode-\d+/i.test(href))continue;
+    href=source.base+match[1];
     var heading=(link.match(/<(?:h3|h2|strong)\b[^>]*>([\s\S]*?)<\/(?:h3|h2|strong)>/i)||[])[1];
     var image=(link.match(/<img\b[^>]*>/i)||[""])[0];
-    var title=heading||__shiroxAttr(tag,"title")||__shiroxAttr(image,"alt")||link.replace(/^<a\b[^>]*>|<\/a>$/gi,"");
-    title=String(title).replace(/<[^>]*>/g," ").replace(/&amp;/gi,"&").replace(/&quot;/gi,'"').replace(/&#39;/gi,"'").replace(/\s+/g," ").trim();
-    var picture=__shiroxAttr(image,"data-src")||__shiroxAttr(image,"src");
-    if(!title||title.length>180)return;
-    seen[href]=true;out.push({title:title,href:href,image:!picture||/^data:/i.test(picture)?"":__unifiedAbsolute(source,picture)});
-  });
+    var title=clean(heading||__shiroxAttr(tag,"title")||__shiroxAttr(image,"alt")||link.replace(/^<a\b[^>]*>|<\/a>$/gi,""));
+    var picture=pictureFrom(link),backdrop="",description="";
+    // Current SerienStream hero pictures are siblings before the overlay link.
+    // Scope them to this slide; never borrow the previous title's artwork.
+    if(/home-hero-overlay/.test(tag)){
+      var before=text.slice(Math.max(0,found.index-14000),found.index),start=before.lastIndexOf('class="home-hero-slide"');
+      if(start>=0&&before.slice(start).indexOf("home-hero-overlay")<0){backdrop=pictureFrom(before.slice(start));if(!picture)picture=backdrop}
+      description=clean((link.match(/<(?:p|div)\b[^>]*class=["'][^"']*home-hero-(?:description|desc)[^"']*["'][^>]*>([\s\S]*?)<\/(?:p|div)>/i)||[])[1]);
+    }
+    if(!title||title.length>180)continue;
+    var row={title:title,href:href,image:picture,backdrop:backdrop,description:description},index=seen[href];
+    if(index!==undefined){
+      // Navigation/hero links without a poster must not suppress later cards.
+      var previous=out[index];
+      if(picture&&(!previous.image||previous.image===previous.backdrop))previous.image=picture;
+      if(backdrop)previous.backdrop=backdrop;
+      if(description)previous.description=description;
+    }else{seen[href]=out.length;out.push(row)}
+  }
   return out.slice(0,100);
 }
 function __unifiedSourceFailure(error,html) {
@@ -1395,6 +1505,9 @@ async function extractCatalog(options){
         waitForSelectors:[kind==="anime"?"a[href*='/anime/stream/']":"a[href*='/serie/']"],maxWaitTime:2});
       if(page){html+="\n"+String(page.html||"");if(page.success!==false)rows=__unifiedCatalogRows(page.html,kind)}
     } catch(e){problem=e}
+  }
+  if(kind==="series"){
+    try{var official=JSON.parse(await __unifiedWithin(__UNIFIED_SOUTHPARK.searchResults("South Park"),6000,"[]","official catalogue"));rows=rows.concat(official)}catch(e){}
   }
   return JSON.stringify(rows.length?rows:__unifiedSourceFailure(problem,html));
 }
@@ -1428,6 +1541,7 @@ function __unifiedWithin(promise, timeoutMs, fallback, operation) {
   });
 }
 function __unifiedProvider(url){
+  if(/^https:\/\/www\.southpark\.de\/(?:seasons\/south-park(?:\/|$)|folgen\/)/i.test(String(url||"")))return __UNIFIED_SOURCES[2];
   var value=String(url||"").toLowerCase();
   if(/^https?:\/\/(?:www\.)?aniworld\.(?:to|cc)(?:\/|$)/.test(value))return __UNIFIED_SOURCES[0];
   if(/^https?:\/\/(?:www\.)?(?:serienstream\.(?:to|cx)|s\.to)(?:\/|$)/.test(value))return __UNIFIED_SOURCES[1];
@@ -1482,7 +1596,7 @@ async function searchResults(keyword,options){
     options&&options.kind!=="anime"?Promise.resolve([]):__unifiedDirectAniWorld(keyword), __UNIFIED_SEARCH_TIMEOUT_MS,
     [], "aniworld direct lookup"
   );
-  var selectedSources=__UNIFIED_SOURCES.filter(function(source){return !options||!options.kind||(options.kind==="anime"?source.id==="aniworld":source.id==="serienstream")});
+  var selectedSources=__UNIFIED_SOURCES.filter(function(source){return !options||!options.kind||(options.kind==="anime"?source.id==="aniworld":source.id!=="aniworld")});
   var sourceFailures=[];
   var batch=await Promise.all(selectedSources.map(async function(source){
     try{

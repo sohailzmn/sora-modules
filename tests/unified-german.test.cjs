@@ -238,7 +238,7 @@ test("a rejected HTTP request still allows a passive normal browser load", async
   assert.equal(browserCalls,1);
 });
 test("all bundled JavaScript parses in the module runtime", () => {
-  assert.ok(instance().__UNIFIED_SOURCES.length === 2);
+  assert.ok(instance().__UNIFIED_SOURCES.length === 3);
 });
 test("catalogues are searched together, with unambiguous source URLs", async () => {
   const ctx = instance();
@@ -598,4 +598,45 @@ test("a denied native player refresh retains an otherwise valid browser stream",
  ctx.fetchv2=async url=>({status:url===player?403:200,text:async()=>url===episode?'<button data-play-url="/r?t=opaque" data-provider-name="VOE" data-language-id="1"></button>':'#EXTM3U\n#EXTINF:1200,\nepisode.ts\n#EXT-X-ENDLIST'});
  const result=JSON.parse(await ctx.extractStreamUrl(episode,{languagePriority:0}));
  assert.equal(result.streams[0].streamUrl,'https://media.example/valid.m3u8');
+});
+
+
+test("home prefers a real poster card over an earlier text-only duplicate",()=>{
+ const ctx=instance();const rows=ctx.__unifiedCatalogRows('<a href="/serie/south-park">South Park</a>'+ '<a href="/serie/south-park"><img data-src="/poster.jpg" src="data:image/gif;base64,placeholder" alt="South Park"></a>','series');
+ assert.equal(rows.length,1);assert.equal(rows[0].image,'https://serienstream.to/poster.jpg');
+});
+test("series hero artwork stays scoped to its title and retains poster artwork",()=>{
+ const ctx=instance();const html='<div class="home-hero-slide"><picture><img src="/mobland-backdrop.jpg"></picture><a class="home-hero-overlay" href="/serie/mobland"><h2>MobLand</h2></a></div>'+ '<a class="home-hero-overlay" href="/serie/dexter"><h2>Dexter</h2></a>'+ '<a href="/serie/mobland"><img data-src="/mobland-poster.jpg" alt="MobLand"></a>';
+ const rows=ctx.__unifiedCatalogRows(html,'series');assert.equal(rows[0].image,'https://serienstream.to/mobland-poster.jpg');assert.equal(rows[0].backdrop,'https://serienstream.to/mobland-backdrop.jpg');assert.equal(rows[1].image,'');
+});
+test("catalogue handles srcset-only lazy pictures without exposing placeholders",()=>{
+ const rows=instance().__unifiedCatalogRows('<a href="/serie/test"><img alt="Test" src="data:image/gif;base64,x" data-srcset="/small.jpg 375w, /large.jpg 1024w"></a>','series');assert.equal(rows[0].image,'https://serienstream.to/small.jpg');
+});
+function southParkPage(data){return '<script>window.__DATA__ = '+JSON.stringify(data)+';window.__OTHER__={};</script>'}
+function southParkItem(season,episode){return {itemType:'episode',url:'/folgen/abc123/south-park-test-staffel-'+season+'-ep-'+episode}}
+test("official South Park is searchable only after the German catalogue confirms it",async()=>{
+ const c=instance();let calls=0;c.fetchv2=async()=>{calls++;return {status:200,text:async()=>'<meta property="og:image" content="https://images.paramount.tech/poster.jpg"><a href="'+southParkItem(1,1).url+'">S1</a>'}};
+ assert.equal(await c.__UNIFIED_SOUTHPARK.searchResults('South Park Movie'),'[]');assert.equal(calls,0);
+ const rows=JSON.parse(await c.searchResults('South Park',{kind:'series'}));assert.equal(rows.length,1);assert.equal(rows[0].href,'https://www.southpark.de/seasons/south-park');
+ const blocked=instance();blocked.fetchv2=async()=>({status:403,text:async()=>''});assert.equal(await blocked.__UNIFIED_SOUTHPARK.searchResults('South Park'),'[]');
+});
+test("official catalogue follows public season pagination and stable episode order",async()=>{
+ const c=instance(),base='https://www.southpark.de';const more='/api/context/mgid%3Aarc%3Aseason%3Asouthpark.intl%3A12345678-abcd/episode/2/10';
+ const root={nav:{url:'/seasons/south-park/cfnwds/staffel-2'},list:{isEpisodes:true,items:Array.from({length:10},(_,i)=>southParkItem(1,i+1)),loadMore:{url:more}}};
+ const visited=[];c.fetchv2=async(url)=>{visited.push(url);return {status:200,text:async()=>url===base+more?JSON.stringify({items:[southParkItem(1,11),southParkItem(1,12),southParkItem(1,13)]}):url.includes('/cfnwds/')?southParkPage({items:[southParkItem(2,1)]}):southParkPage(root)}};
+ const rows=JSON.parse(await c.extractEpisodes(base+'/seasons/south-park'));assert.equal(rows.length,14);assert.equal(rows[12].number,13);assert.match(rows[12].href,/-staffel-1-ep-13$/);assert.equal(rows[13].number,14);assert.match(rows[13].href,/-staffel-2-ep-1$/);assert.ok(visited.includes(base+more));
+});
+function southParkStreamFixture({error=false,language='de',wrongEpisode=false}={}){
+ const c=instance(),mgid='mgid:arc:episode:shared.southpark.gsa.de:12345678-abcd',service='https://topaz.paramount.tech/topaz/api/'+mgid+'/mica.json?clientPlatform={clientPlatform}',episode='https://www.southpark.de'+southParkItem(1,1).url,media='https://ns-stream.paramount.tech/episode/master.m3u8';
+ c.fetchv2=async(url)=>({status:200,text:async()=>url===episode?southParkPage({video:{videoServiceUrl:service}}):url.startsWith('https://topaz.')?JSON.stringify(error?{error:{errormessage:'geoblocked'}}:{stitchedstream:{source:media,manifesttype:'hls'},content:[{id:wrongEpisode?'other':mgid}]}):'#EXTM3U\n#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",LANGUAGE="'+language+'",URI="audio.m3u8"\n#EXT-X-STREAM-INF:BANDWIDTH=800000\nvideo.m3u8'});
+ return {c,episode,media};
+}
+test("official playback keeps the published stitched HLS and confirmed German audio",async()=>{
+ const {c,episode,media}=southParkStreamFixture();const data=JSON.parse(await c.extractStreamUrl(episode,{languagePriority:0}));assert.equal(data.streams.length,1);assert.equal(data.streams[0].streamUrl,media);assert.equal(data.streams[0].audioLanguage,'de');assert.equal(data.streams[0].headers.Referer,episode);
+});
+test("official playback rejects geo errors, a different episode and unconfirmed German audio",async()=>{
+ for(const options of [{error:true},{language:'en'},{wrongEpisode:true}]){const {c,episode}=southParkStreamFixture(options);assert.equal(JSON.parse(await c.extractStreamUrl(episode)).streams.length,0)}
+});
+test("official embedded data is parsed as JSON without executing scripts",()=>{
+ const c=instance();assert.equal(c.__UNIFIED_SOUTHPARK.parseData('<script>window.__DATA__ = {"text":"brace } and \\\" quote","items":[]};malicious()</script>').items.length,0);assert.equal(c.__UNIFIED_SOUTHPARK.parseData('<script>window.__DATA__ = execute()</script>'),null);
 });
