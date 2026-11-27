@@ -1428,7 +1428,15 @@ var __UNIFIED_SOUTHPARK=(function(){
   var media=response.stitchedstream.source;
   if(!/^https:\/\/ns-stream\.paramount\.tech\//i.test(media))return empty;
   var manifest=await read(media);
-  if(!/^#EXTM3U/.test(manifest)||!/#EXT-X-MEDIA:[^\n]*TYPE=AUDIO[^\n]*LANGUAGE="de"/i.test(manifest)||/METHOD=SAMPLE-AES/i.test(manifest))return empty;
+  var germanAudio=manifest.split(/\r?\n/).some(function(line){
+    if(!/^#EXT-X-MEDIA:/i.test(line)||!/\bTYPE=AUDIO\b/i.test(line))return false;
+    var language=(line.match(/\bLANGUAGE="([^"]*)"/i)||[])[1]||"";
+    if(/^(?:de|deu|ger)(?:[-_][a-z0-9-]+)?$/i.test(language))return true;
+    // Some published German seasons provide NAME="Deutsch" without LANGUAGE.
+    // Do not override an explicitly non-German language with a conflicting name.
+    return (!language||/^und$/i.test(language))&&/\bNAME="(?:Deutsch|German|de|deu|ger)(?:["\s(-])/i.test(line);
+  });
+  if(!/^#EXTM3U/.test(manifest)||!germanAudio||/METHOD=SAMPLE-AES/i.test(manifest))return empty;
   return JSON.stringify({streams:[{title:"South Park offiziell · Deutsch",streamUrl:media,audioLanguage:"de",headers:{Referer:url}}],subtitles:[]});
  }
  return {searchResults:search,extractDetails:details,extractEpisodes:episodes,extractStreamUrl:streams,parseData:data};

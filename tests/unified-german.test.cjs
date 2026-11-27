@@ -626,9 +626,9 @@ test("official catalogue follows public season pagination and stable episode ord
  const visited=[];c.fetchv2=async(url)=>{visited.push(url);return {status:200,text:async()=>url===base+more?JSON.stringify({items:[southParkItem(1,11),southParkItem(1,12),southParkItem(1,13)]}):url.includes('/cfnwds/')?southParkPage({items:[southParkItem(2,1)]}):southParkPage(root)}};
  const rows=JSON.parse(await c.extractEpisodes(base+'/seasons/south-park'));assert.equal(rows.length,14);assert.equal(rows[12].number,13);assert.match(rows[12].href,/-staffel-1-ep-13$/);assert.equal(rows[13].number,14);assert.match(rows[13].href,/-staffel-2-ep-1$/);assert.ok(visited.includes(base+more));
 });
-function southParkStreamFixture({error=false,language='de',wrongEpisode=false}={}){
+function southParkStreamFixture({error=false,language='de',wrongEpisode=false,name}={}){
  const c=instance(),mgid='mgid:arc:episode:shared.southpark.gsa.de:12345678-abcd',service='https://topaz.paramount.tech/topaz/api/'+mgid+'/mica.json?clientPlatform={clientPlatform}',episode='https://www.southpark.de'+southParkItem(1,1).url,media='https://ns-stream.paramount.tech/episode/master.m3u8';
- c.fetchv2=async(url)=>({status:200,text:async()=>url===episode?southParkPage({video:{videoServiceUrl:service}}):url.startsWith('https://topaz.')?JSON.stringify(error?{error:{errormessage:'geoblocked'}}:{stitchedstream:{source:media,manifesttype:'hls'},content:[{id:wrongEpisode?'other':mgid}]}):'#EXTM3U\n#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",LANGUAGE="'+language+'",URI="audio.m3u8"\n#EXT-X-STREAM-INF:BANDWIDTH=800000\nvideo.m3u8'});
+ c.fetchv2=async(url)=>({status:200,text:async()=>url===episode?southParkPage({video:{videoServiceUrl:service}}):url.startsWith('https://topaz.')?JSON.stringify(error?{error:{errormessage:'geoblocked'}}:{stitchedstream:{source:media,manifesttype:'hls'},content:[{id:wrongEpisode?'other':mgid}]}):'#EXTM3U\n#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio"'+(language==null?'':',LANGUAGE="'+language+'"')+(name?',NAME="'+name+'"':'')+',URI="audio.m3u8"\n#EXT-X-STREAM-INF:BANDWIDTH=800000\nvideo.m3u8'});
  return {c,episode,media};
 }
 test("official playback keeps the published stitched HLS and confirmed German audio",async()=>{
@@ -645,4 +645,10 @@ test("official embedded data is parsed as JSON without executing scripts",()=>{
 test("series details prefer the complete German story and real poster over SEO/backdrop",async()=>{
  const c=seriesInstance();c.__requestText=async()=>'<h1>MobLand</h1><meta name="description" content="Watch MobLand online..."><meta property="og:image" content="/backdrop.jpg"><img alt="MobLand Cover" data-src="/poster.jpg"><div class="series-description"><p class="clamped"><span class="description-text">Die vollständige Handlung mit <em>allen</em> Details &amp; einem zweiten Absatz.</span></p></div>';
  const details=JSON.parse(await c.extractDetails('https://serienstream.to/serie/mobland'))[0];assert.equal(details.description,'Die vollständige Handlung mit allen Details & einem zweiten Absatz.');assert.equal(details.image,'https://serienstream.to/poster.jpg');assert.equal(details.backdrop,'https://serienstream.to/backdrop.jpg');
+});
+
+
+test("official German audio accepts regional ISO codes and explicit track names without a code",async()=>{
+ for(const options of [{language:'de-DE'},{language:'deu'},{language:null,name:'Deutsch'},{language:'und',name:'German'}]){const {c,episode}=southParkStreamFixture(options);assert.equal(JSON.parse(await c.extractStreamUrl(episode)).streams[0]?.audioLanguage,'de')}
+ for(const options of [{language:null,name:'English'},{language:'en',name:'Deutsch'},{language:null,name:'Original'}]){const {c,episode}=southParkStreamFixture(options);assert.equal(JSON.parse(await c.extractStreamUrl(episode)).streams.length,0)}
 });
